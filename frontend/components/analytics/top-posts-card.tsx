@@ -1,0 +1,26 @@
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { ReportPost } from "@/types/analytics";
+
+export function TopPostsCard({ title, posts }: { title: string; posts: ReportPost[] }) {
+  return (
+    <Card className="bg-white/80">
+      <CardHeader>
+        <CardTitle>{title}</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {posts.length ? (
+          posts.map((post) => (
+            <div key={post.post_id || post.post_url} className="rounded-2xl bg-muted p-4">
+              <div className="text-sm font-medium">{post.post_text || post.post_url}</div>
+              <div className="mt-2 text-xs text-muted-foreground">
+                score: {post.score} | comments: {post.comments_count}
+              </div>
+            </div>
+          ))
+        ) : (
+          <div className="text-sm text-muted-foreground">Нет данных.</div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}

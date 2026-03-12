@@ -1,0 +1,17 @@
+fastapi==0.115.12
+uvicorn[standard]==0.34.0
+sqlalchemy==2.0.39
+alembic==1.15.1
+psycopg[binary]==3.2.6
+pydantic==2.10.6
+pydantic-settings==2.8.1
+celery==5.4.0
+redis==5.2.1
+httpx==0.28.1
+python-dateutil==2.9.0.post0
+telethon==1.42.0
+sentence-transformers==3.4.1
+scikit-learn==1.6.1
+numpy==2.2.3
+openai==1.66.3
+orjson==3.10.15
