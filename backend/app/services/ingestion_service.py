@@ -13,6 +13,15 @@ from app.repositories.project_repository import ProjectRepository
 from app.repositories.source_repository import SourceRepository
 from app.schemas.source import IndexModeEnum, IndexPeriodPresetEnum, IndexRequest
 from app.utils.dates import utcnow
+from app.utils.index_progress import (
+    build_progress_summary,
+    clear_current_source,
+    finish_source_progress,
+    init_project_progress,
+    set_source_processed_posts,
+    set_source_total_posts,
+    start_source_progress,
+)
 from app.utils.provider_cache import (
     comments_cache_key,
     load_comments,
@@ -61,10 +70,26 @@ class IngestionService:
         counts: dict[str, int] = {}
         for source in sources:
             counts[source.status.value] = counts.get(source.status.value, 0) + 1
+        progress = build_progress_summary(str(project_id))
+        if progress is None and sources:
+            ready_like = counts.get(SourceStatusEnum.ready.value, 0) + counts.get(SourceStatusEnum.failed.value, 0)
+            progress = {
+                "percent": round((ready_like / len(sources)) * 100, 1),
+                "current_source_title": None,
+                "current_source_index": 0,
+                "total_sources": len(sources),
+                "completed_sources": ready_like,
+                "processed_posts": 0,
+                "total_posts": 0,
+                "posts_label": None,
+                "updated_at": None,
+                "finished_at": None,
+            }
         return {
             "project_id": str(project_id),
             "total_sources": len(sources),
             "status_breakdown": counts,
+            "progress": progress,
             "sources": [
                 {
                     "id": str(source.id),
@@ -85,11 +110,16 @@ class IngestionService:
         posts_limit: int | None = None,
     ) -> dict:
         stats = {"sources": 0, "posts": 0, "comments": 0}
-        for source in self.sources.list_by_project(project_id):
+        project_sources = self.sources.list_by_project(project_id)
+        init_project_progress(str(project_id), len(project_sources))
+        for index, source in enumerate(project_sources, start=1):
+            start_source_progress(str(project_id), str(source.id), source.title or source.source_url, index)
             result = self.index_single_source_sync(source.id, since=since, until=until, posts_limit=posts_limit)
             stats["sources"] += 1
             stats["posts"] += result["posts"]
             stats["comments"] += result["comments"]
+            finish_source_progress(str(project_id))
+            clear_current_source(str(project_id))
         return stats
 
     def index_single_source_sync(
@@ -118,9 +148,10 @@ class IngestionService:
                 posts_limit=posts_limit,
             )
             persisted_posts = self.posts.upsert_posts(source.id, posts)
+            set_source_total_posts(str(source.project_id), len(posts))
 
             total_comments = 0
-            for normalized_post, persisted_post in zip(posts, persisted_posts, strict=False):
+            for index, (normalized_post, persisted_post) in enumerate(zip(posts, persisted_posts, strict=False), start=1):
                 try:
                     comments = self._fetch_comments_with_cache(
                         provider=provider,
@@ -137,6 +168,8 @@ class IngestionService:
                         source.platform.value,
                         exc,
                     )
+                finally:
+                    set_source_processed_posts(str(source.project_id), index)
 
             source.status = SourceStatusEnum.ready
             source.last_indexed_at = utcnow()

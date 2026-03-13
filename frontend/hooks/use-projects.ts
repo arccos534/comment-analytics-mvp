@@ -3,6 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { api } from "@/lib/api";
+import { Project } from "@/types/project";
 
 export function useProjects() {
   return useQuery({
@@ -35,8 +36,27 @@ export function useDeleteProject() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: api.deleteProject,
+    onMutate: async (projectId) => {
+      await queryClient.cancelQueries({ queryKey: ["projects"] });
+      const previousProjects = queryClient.getQueryData<Project[]>(["projects"]);
+      if (previousProjects) {
+        queryClient.setQueryData<Project[]>(
+          ["projects"],
+          previousProjects.filter((project) => project.id !== projectId)
+        );
+      }
+      return { previousProjects };
+    },
+    onError: (_error, _projectId, context) => {
+      if (context?.previousProjects) {
+        queryClient.setQueryData(["projects"], context.previousProjects);
+      }
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["projects"] });
-    }
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ["projects"] });
+    },
   });
 }

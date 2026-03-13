@@ -19,10 +19,19 @@ const modeButtonClass =
 export function IndexingControls({
   disabled,
   isPending,
+  progress,
   onStart,
 }: {
   disabled: boolean;
   isPending: boolean;
+  progress?: {
+    percent: number;
+    current_source_title: string | null;
+    current_source_index: number;
+    total_sources: number;
+    completed_sources: number;
+    posts_label: string | null;
+  } | null;
   onStart: (payload: StartIndexingPayload) => void;
 }) {
   const [mode, setMode] = useState<IndexModeUi>("latest_posts");
@@ -158,9 +167,33 @@ export function IndexingControls({
           {helperText}
         </div>
 
-        <Button disabled={disabled || isPending || !payload} onClick={() => payload && onStart(payload)}>
-          {isPending ? "Indexing..." : "Start indexing"}
-        </Button>
+        <div className="flex flex-col gap-3 md:flex-row md:items-center">
+          <Button disabled={disabled || isPending || !payload} onClick={() => payload && onStart(payload)}>
+            {isPending ? "Indexing..." : "Start indexing"}
+          </Button>
+
+          {progress && progress.percent > 0 && progress.percent < 100 ? (
+            <div className="min-w-0 flex-1 rounded-xl border border-border/60 bg-background/50 px-3 py-2.5">
+              <div className="mb-2 flex items-center justify-between gap-3 text-xs text-muted-foreground">
+                <div className="min-w-0 truncate">
+                  {progress.current_source_title
+                    ? `Indexing: ${progress.current_source_title}`
+                    : `Indexing source ${Math.max(progress.current_source_index, progress.completed_sources + 1)}/${progress.total_sources}`}
+                </div>
+                <div className="shrink-0 font-medium text-foreground">{progress.percent.toFixed(0)}%</div>
+              </div>
+              <div className="h-2 overflow-hidden rounded-full bg-white/5">
+                <div
+                  className="h-full rounded-full bg-primary transition-[width] duration-500 ease-out"
+                  style={{ width: `${progress.percent}%` }}
+                />
+              </div>
+              <div className="mt-2 text-xs text-muted-foreground">
+                {progress.posts_label ?? `${progress.completed_sources}/${progress.total_sources} sources completed`}
+              </div>
+            </div>
+          ) : null}
+        </div>
       </CardContent>
     </Card>
   );

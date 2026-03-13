@@ -37,6 +37,18 @@ export interface IndexStatusResponse {
   project_id: string;
   total_sources: number;
   status_breakdown: Record<string, number>;
+  progress: {
+    percent: number;
+    current_source_title: string | null;
+    current_source_index: number;
+    total_sources: number;
+    completed_sources: number;
+    processed_posts: number;
+    total_posts: number;
+    posts_label: string | null;
+    updated_at: string | null;
+    finished_at: string | null;
+  } | null;
   sources: Array<{
     id: string;
     title: string | null;

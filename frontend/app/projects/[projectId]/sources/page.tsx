@@ -42,6 +42,7 @@ export default function ProjectSourcesPage({ params }: { params: { projectId: st
       <IndexingControls
         disabled={!sources.length}
         isPending={startIndexing.isPending}
+        progress={indexStatus?.progress}
         onStart={(payload) => startIndexing.mutate(payload)}
       />
 
