@@ -173,7 +173,7 @@ export function IndexingControls({
             {isPending ? "Indexing..." : "Start indexing"}
           </Button>
 
-          {progress && progress.percent > 0 && progress.percent < 100 ? (
+          {progress && progress.total_sources > 0 && progress.overall_percent < 100 ? (
             <div className="min-w-0 flex-1 rounded-xl border border-border/60 bg-background/50 px-3 py-2.5">
               <div className="mb-2 flex items-center justify-between gap-3 text-xs text-muted-foreground">
                 <div className="min-w-0 truncate">
