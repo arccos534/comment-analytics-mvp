@@ -12,6 +12,10 @@ $FrontendDir = Join-Path $RepoRoot "frontend"
 $LocalDir = Join-Path $RepoRoot ".local"
 $PgData = Join-Path $LocalDir "pgdata"
 $PgLog = Join-Path $LocalDir "postgres-55432.log"
+$DemoModeValue = "false"
+if ($DemoMode.IsPresent) {
+    $DemoModeValue = "true"
+}
 
 $Python311 = (Get-Command py -ErrorAction SilentlyContinue)
 if (-not $Python311) {
@@ -83,7 +87,7 @@ Push-Location $BackendDir
 try {
     $env:DATABASE_URL = "postgresql+psycopg://postgres@127.0.0.1:55432/comment_analytics"
     $env:REDIS_URL = "redis://localhost:6379/0"
-    $env:DEMO_MODE = $DemoMode.IsPresent ? "true" : "false"
+    $env:DEMO_MODE = $DemoModeValue
     $env:BACKGROUND_JOBS_ENABLED = "false"
     & $BackendPython -m alembic upgrade head
 }
@@ -96,7 +100,7 @@ if (-not $SkipBackend) {
     $backendCommand = @"
 `$env:DATABASE_URL='postgresql+psycopg://postgres@127.0.0.1:55432/comment_analytics'
 `$env:REDIS_URL='redis://localhost:6379/0'
-`$env:DEMO_MODE='$($DemoMode.IsPresent ? "true" : "false")'
+`$env:DEMO_MODE='$DemoModeValue'
 `$env:BACKGROUND_JOBS_ENABLED='false'
 Set-Location '$BackendDir'
 & '$BackendPython' -m uvicorn app.main:app --host 127.0.0.1 --port 8000

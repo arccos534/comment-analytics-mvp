@@ -142,4 +142,66 @@ powershell -ExecutionPolicy Bypass -File .\scripts\start-local.ps1 -DemoMode
 - В local default `BACKGROUND_JOBS_ENABLED=false`, поэтому Redis/Celery не обязательны для одного узла.
 - Demo mode доступен отдельно для synthetic end-to-end проверки.
 - Реальные интеграции находятся в `backend/app/providers/telegram_provider.py` и `backend/app/providers/vk_provider.py`.
+
+## Server Deployment
+
+Для реального production запуска проще всего поднимать весь стек на одном VPS через Docker Compose.
+
+### Что нужно
+
+- VPS с Ubuntu 22.04/24.04
+- Docker и Docker Compose Plugin
+- два DNS имени:
+  - `app.example.com`
+  - `api.example.com`
+- заполненный файл `.env.server`
+
+### Файлы
+
+- server env template: `.env.server.example`
+- server compose: `docker-compose.server.yml`
+- reverse proxy: `infra/Caddyfile`
+- deploy script: `scripts/deploy-server.sh`
+
+### Подготовка сервера
+
+```bash
+sudo apt-get update
+sudo apt-get install -y ca-certificates curl git
+curl -fsSL https://get.docker.com | sh
+sudo usermod -aG docker $USER
+newgrp docker
+```
+
+### Деплой
+
+```bash
+git clone https://github.com/arccos534/comment-analytics-mvp.git
+cd comment-analytics-mvp
+cp .env.server.example .env.server
+```
+
+Заполните `.env.server`, затем:
+
+```bash
+chmod +x scripts/deploy-server.sh
+./scripts/deploy-server.sh
+```
+
+Если DNS уже указывает на сервер, Caddy сам поднимет HTTPS для `APP_DOMAIN` и `API_DOMAIN`.
+
+### Что настроить в `.env.server`
+
+- `APP_DOMAIN`
+- `API_DOMAIN`
+- `TELEGRAM_API_ID`
+- `TELEGRAM_API_HASH`
+- `TELEGRAM_SESSION_STRING`
+- `VK_API_TOKEN`
+- `OPENAI_COMPATIBLE_API_KEY` при необходимости
+
+### URLs после деплоя
+
+- frontend: `https://app.example.com`
+- backend docs: `https://api.example.com/docs`
 - Если `sentence-transformers` или LLM endpoint недоступны, система использует локальные эвристики и все равно возвращает отчет.

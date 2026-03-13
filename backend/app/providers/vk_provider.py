@@ -204,6 +204,10 @@ class VkProvider(BaseProvider):
         if not resolved or resolved.get("type") not in {"group", "page", "event"}:
             raise ProviderRequestError("VK source is not a public community")
         groups = self._api_call("groups.getById", {"group_ids": resolved["object_id"]})
+        if isinstance(groups, dict) and "groups" in groups:
+            groups = groups["groups"]
+        if isinstance(groups, dict):
+            groups = [groups]
         if not groups:
             raise ProviderRequestError("VK group metadata not found")
         return groups[0]
