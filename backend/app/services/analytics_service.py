@@ -23,6 +23,57 @@ from app.utils.dates import utcnow
 
 logger = logging.getLogger(__name__)
 
+REPORT_TITLE_STOPWORDS = {
+    "проанализируй",
+    "проанализировать",
+    "анализ",
+    "какие",
+    "какой",
+    "какая",
+    "какие",
+    "какое",
+    "каким",
+    "каких",
+    "нужно",
+    "надо",
+    "хочу",
+    "покажи",
+    "показать",
+    "найди",
+    "найти",
+    "оцени",
+    "оценить",
+    "сделай",
+    "сделать",
+    "дай",
+    "дать",
+    "реакцию",
+    "реакции",
+    "отношение",
+    "аудитории",
+    "людей",
+    "комментарии",
+    "комментариев",
+    "комментариям",
+    "комментария",
+    "новости",
+    "новостей",
+    "новостям",
+    "посты",
+    "постов",
+    "постам",
+    "отчет",
+    "отчёт",
+    "отчета",
+    "отчёта",
+    "отчеты",
+    "отчёты",
+    "теме",
+    "тему",
+    "вопросу",
+    "вопрос",
+}
+
 
 class AnalyticsService:
     def __init__(self, db: Session) -> None:
@@ -95,9 +146,46 @@ class AnalyticsService:
         return list(grouped.values())
 
     def _build_report_title(self, theme: str | None, prompt_text: str) -> str:
-        base = (theme or "").strip() or prompt_text.strip()
-        normalized = re.sub(r"\s+", " ", base)
-        return normalized[:64].rstrip() + ("..." if len(normalized) > 64 else "")
+        if (theme or "").strip():
+            return self._format_report_title(theme or "")
+
+        derived = self._derive_title_from_prompt(prompt_text)
+        return self._format_report_title(derived or prompt_text)
+
+    def _format_report_title(self, value: str) -> str:
+        normalized = re.sub(r"\s+", " ", value).strip(" ,.;:-")
+        words = normalized.split()
+        shortened = " ".join(words[:4]) if words else normalized
+        if not shortened:
+            return "Report"
+        return shortened[:1].upper() + shortened[1:]
+
+    def _derive_title_from_prompt(self, prompt_text: str) -> str:
+        prompt = re.sub(r"\s+", " ", prompt_text).strip()
+
+        phrase_patterns = [
+            r"\b(?:по|про|о|об|относительно|насчет)\s+([A-Za-zА-Яа-яЁё0-9-]+(?:\s+[A-Za-zА-Яа-яЁё0-9-]+){0,4})",
+            r"\bк\s+([A-Za-zА-Яа-яЁё0-9-]+(?:\s+[A-Za-zА-Яа-яЁё0-9-]+){0,4})",
+        ]
+        for pattern in phrase_patterns:
+            match = re.search(pattern, prompt, flags=re.IGNORECASE)
+            if not match:
+                continue
+            cleaned = self._strip_generic_title_words(match.group(1))
+            if cleaned:
+                return cleaned
+
+        tokens = re.findall(r"[A-Za-zА-Яа-яЁё0-9-]{3,}", prompt.lower())
+        meaningful = [token for token in tokens if token not in REPORT_TITLE_STOPWORDS]
+        if meaningful:
+            return " ".join(meaningful[-3:])
+        return prompt
+
+    def _strip_generic_title_words(self, phrase: str) -> str:
+        words = [word for word in re.findall(r"[A-Za-zА-Яа-яЁё0-9-]+", phrase) if word]
+        while words and words[0].lower() in REPORT_TITLE_STOPWORDS:
+            words.pop(0)
+        return " ".join(words[:4])
 
     def _tokenize_scope(self, value: str) -> set[str]:
         return set(re.findall(r"[A-Za-zА-Яа-яЁё0-9-]{4,}", value.lower()))
