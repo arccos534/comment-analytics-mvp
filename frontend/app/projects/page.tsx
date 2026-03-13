@@ -14,16 +14,27 @@ export default function ProjectsPage() {
       <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
         <Header
           title="Projects"
-          subtitle="Создавайте проекты, индексируйте Telegram/VK и запускайте аналитические отчеты."
+          subtitle="Создавайте базы источников, запускайте индексацию и собирайте отчеты по реакции аудитории в одном темном рабочем контуре."
         />
         <CreateProjectDialog />
       </div>
 
-      {isLoading ? <Card><CardContent className="p-6">Loading projects...</CardContent></Card> : null}
-      {error ? <Card><CardContent className="p-6 text-rose-700">{error.message}</CardContent></Card> : null}
+      {isLoading ? (
+        <Card className="app-panel">
+          <CardContent className="p-6 text-slate-300/70">Загружаем проекты...</CardContent>
+        </Card>
+      ) : null}
+
+      {error ? (
+        <Card className="app-panel border-rose-400/15">
+          <CardContent className="p-6 text-rose-300">{error.message}</CardContent>
+        </Card>
+      ) : null}
 
       <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
-        {data?.map((project) => <ProjectCard key={project.id} project={project} />)}
+        {data?.map((project) => (
+          <ProjectCard key={project.id} project={project} />
+        ))}
       </div>
     </div>
   );

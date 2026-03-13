@@ -37,10 +37,10 @@ export function CreateProjectDialog() {
       <DialogTrigger asChild>
         <Button size="lg">Create database</Button>
       </DialogTrigger>
-      <DialogContent>
+      <DialogContent className="border-white/10 bg-[linear-gradient(180deg,rgba(18,24,34,0.98),rgba(13,19,28,0.98))]">
         <DialogHeader>
-          <DialogTitle>Новый проект</DialogTitle>
-          <DialogDescription>Создайте контейнер для источников Telegram и VK.</DialogDescription>
+          <DialogTitle>Новая база данных</DialogTitle>
+          <DialogDescription>Создайте рабочую базу для источников Telegram и VK.</DialogDescription>
         </DialogHeader>
         <div className="space-y-4">
           <div className="space-y-2">
@@ -57,7 +57,7 @@ export function CreateProjectDialog() {
             />
           </div>
           <Button disabled={!name.trim() || createProject.isPending} onClick={handleSubmit} className="w-full">
-            {createProject.isPending ? "Creating..." : "Create"}
+            {createProject.isPending ? "Создаем..." : "Создать"}
           </Button>
         </div>
       </DialogContent>

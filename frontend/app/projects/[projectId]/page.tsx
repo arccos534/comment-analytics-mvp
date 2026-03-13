@@ -15,12 +15,12 @@ export default function ProjectOverviewPage({ params }: { params: { projectId: s
   }
 
   if (!data || error) {
-    return <div className="text-rose-700">{error?.message || "Project not found"}</div>;
+    return <div className="text-rose-300">{error?.message || "Project not found"}</div>;
   }
 
   return (
     <div className="space-y-8">
-      <Header title={data.name} subtitle={data.description || "Project overview"} />
+      <Header title={data.name} subtitle={data.description || "Обзор проекта, источников и текущего объема данных."} />
 
       <div className="grid gap-4 md:grid-cols-3">
         <Metric title="Sources" value={data.stats.total_sources} />
@@ -42,11 +42,14 @@ export default function ProjectOverviewPage({ params }: { params: { projectId: s
 
 function Metric({ title, value }: { title: string; value: number }) {
   return (
-    <Card className="overflow-hidden border-white/10 bg-card/70 backdrop-blur">
+    <Card className="overflow-hidden border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.06),rgba(255,255,255,0.025))]">
       <CardHeader className="pb-4">
-        <CardTitle className="text-base text-muted-foreground">{title}</CardTitle>
+        <CardTitle className="text-base text-slate-300/68">{title}</CardTitle>
       </CardHeader>
-      <CardContent className="pb-6 text-5xl font-semibold tracking-tight">{value}</CardContent>
+      <CardContent className="space-y-4 pb-6">
+        <div className="text-5xl font-semibold tracking-[-0.05em] text-white">{value}</div>
+        <div className="h-1.5 w-24 rounded-full bg-[linear-gradient(90deg,rgba(84,194,239,0.95),rgba(84,194,239,0.15))]" />
+      </CardContent>
     </Card>
   );
 }

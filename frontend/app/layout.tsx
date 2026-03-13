@@ -19,9 +19,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="ru">
       <body className={`${headingFont.variable} ${bodyFont.variable} font-[var(--font-body)]`}>
         <QueryProvider>
-          <div className="min-h-screen xl:grid xl:grid-cols-[18rem_1fr]">
+          <div className="app-shell min-h-screen xl:grid xl:grid-cols-[20rem_1fr]">
             <Sidebar />
-            <main className="p-5 md:p-8 xl:p-10">{children}</main>
+            <main className="relative p-5 md:p-8 xl:p-10">
+              <div className="app-panel-strong min-h-[calc(100vh-3rem)] p-5 md:p-8 xl:p-10">{children}</div>
+            </main>
           </div>
         </QueryProvider>
       </body>
