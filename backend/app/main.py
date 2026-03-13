@@ -2,6 +2,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 
 from app.api.routes.analytics import router as analytics_router
 from app.api.routes.comments import router as comments_router
@@ -34,6 +35,7 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    app.add_middleware(GZipMiddleware, minimum_size=1024)
 
     app.include_router(health_router)
     app.include_router(projects_router, prefix=settings.api_v1_prefix)

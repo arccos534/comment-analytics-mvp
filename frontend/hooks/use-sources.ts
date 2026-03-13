@@ -3,13 +3,35 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { api } from "@/lib/api";
+import { Source, SourceStatus } from "@/types/source";
 
-export function useSources(projectId: string) {
+function hasActiveSourceStatuses(sources: Source[] | undefined) {
+  if (!sources?.length) {
+    return false;
+  }
+  const activeStatuses: SourceStatus[] = ["pending", "indexing"];
+  return sources.some((source) => activeStatuses.includes(source.status));
+}
+
+function hasActiveIndexing(statusBreakdown: Record<string, number> | undefined) {
+  if (!statusBreakdown) {
+    return false;
+  }
+  return ["pending", "indexing"].some((status) => (statusBreakdown[status] ?? 0) > 0);
+}
+
+export function useSources(projectId: string, options?: { poll?: boolean }) {
   return useQuery({
     queryKey: ["sources", projectId],
     queryFn: () => api.listSources(projectId),
     enabled: Boolean(projectId),
-    refetchInterval: 10_000
+    staleTime: 30_000,
+    refetchInterval: (query) => {
+      if (!options?.poll) {
+        return false;
+      }
+      return hasActiveSourceStatuses(query.state.data as Source[] | undefined) ? 3_000 : false;
+    }
   });
 }
 
@@ -46,6 +68,10 @@ export function useIndexStatus(projectId: string) {
     queryKey: ["index-status", projectId],
     queryFn: () => api.getIndexStatus(projectId),
     enabled: Boolean(projectId),
-    refetchInterval: 10_000
+    staleTime: 5_000,
+    refetchInterval: (query) => {
+      const data = query.state.data as { status_breakdown?: Record<string, number> } | undefined;
+      return hasActiveIndexing(data?.status_breakdown) ? 3_000 : false;
+    }
   });
 }

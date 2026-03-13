@@ -9,7 +9,7 @@ import { useSources } from "@/hooks/use-sources";
 import { useUiStore } from "@/store/ui-store";
 
 export default function ProjectAnalyticsPage({ params }: { params: { projectId: string } }) {
-  const { data: sources = [] } = useSources(params.projectId);
+  const { data: sources = [] } = useSources(params.projectId, { poll: false });
   const latestAnalysisRunId = useUiStore((state) => state.latestAnalysisRunId);
 
   return (

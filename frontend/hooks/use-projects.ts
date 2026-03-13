@@ -5,14 +5,19 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 
 export function useProjects() {
-  return useQuery({ queryKey: ["projects"], queryFn: api.listProjects });
+  return useQuery({
+    queryKey: ["projects"],
+    queryFn: api.listProjects,
+    staleTime: 60_000
+  });
 }
 
 export function useProject(projectId: string) {
   return useQuery({
     queryKey: ["projects", projectId],
     queryFn: () => api.getProject(projectId),
-    enabled: Boolean(projectId)
+    enabled: Boolean(projectId),
+    staleTime: 30_000
   });
 }
 

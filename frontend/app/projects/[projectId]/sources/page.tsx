@@ -8,7 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useIndexStatus, useSources, useStartIndexing } from "@/hooks/use-sources";
 
 export default function ProjectSourcesPage({ params }: { params: { projectId: string } }) {
-  const { data: sources = [], isLoading } = useSources(params.projectId);
+  const { data: sources = [], isLoading } = useSources(params.projectId, { poll: true });
   const { data: indexStatus } = useIndexStatus(params.projectId);
   const startIndexing = useStartIndexing(params.projectId);
 
