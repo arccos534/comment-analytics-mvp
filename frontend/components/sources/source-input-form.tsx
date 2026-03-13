@@ -24,10 +24,12 @@ export function SourceInputForm({ projectId }: { projectId: string }) {
   }
 
   return (
-    <Card className="bg-white/80">
+    <Card className="border-white/10 bg-card/70 backdrop-blur">
       <CardHeader>
         <CardTitle>Добавить источники</CardTitle>
-        <CardDescription>Вставьте ссылки на открытые Telegram-каналы, Telegram-посты, VK-сообщества или VK-посты.</CardDescription>
+        <CardDescription>
+          Вставьте ссылки на открытые Telegram-каналы, Telegram-посты, VK-сообщества или VK-посты.
+        </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         <Textarea
@@ -43,20 +45,22 @@ export function SourceInputForm({ projectId }: { projectId: string }) {
             Add sources
           </Button>
         </div>
+
         {validateSources.data?.length ? (
-          <div className="rounded-2xl bg-muted p-4 text-sm">
+          <div className="rounded-2xl border border-border/60 bg-background/60 p-4 text-sm">
             {validateSources.data.map((item) => (
               <div key={item.url} className="flex justify-between gap-3 py-1">
                 <span className="truncate">{item.normalized_url || item.url}</span>
-                <span className={item.is_valid ? "text-emerald-700" : "text-rose-700"}>
+                <span className={item.is_valid ? "text-emerald-400" : "text-rose-400"}>
                   {item.is_valid ? `${item.platform}/${item.source_type}` : item.reason}
                 </span>
               </div>
             ))}
           </div>
         ) : null}
+
         {addSources.data?.skipped.length ? (
-          <div className="rounded-2xl bg-amber-50 p-4 text-sm text-amber-700">
+          <div className="rounded-2xl border border-amber-500/20 bg-amber-500/10 p-4 text-sm text-amber-200">
             Пропущено: {addSources.data.skipped.map((item) => item.normalized_url || item.url).join(", ")}
           </div>
         ) : null}

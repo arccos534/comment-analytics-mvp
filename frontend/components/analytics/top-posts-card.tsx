@@ -3,14 +3,14 @@ import { ReportPost } from "@/types/analytics";
 
 export function TopPostsCard({ title, posts }: { title: string; posts: ReportPost[] }) {
   return (
-    <Card className="bg-white/80">
+    <Card className="border-white/10 bg-card/70 backdrop-blur">
       <CardHeader>
         <CardTitle>{title}</CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
         {posts.length ? (
           posts.map((post) => (
-            <div key={post.post_id || post.post_url} className="rounded-2xl bg-muted p-4">
+            <div key={post.post_id || post.post_url} className="rounded-2xl border border-border/60 bg-background/55 p-4">
               <div className="text-sm font-medium">{post.post_text || post.post_url}</div>
               <div className="mt-2 text-xs text-muted-foreground">
                 score: {post.score} | comments: {post.comments_count}

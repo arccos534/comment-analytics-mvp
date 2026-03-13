@@ -18,12 +18,12 @@ export default function ReportPage({ params }: { params: { projectId: string; re
   }
 
   if (!runQuery.data) {
-    return <div className="text-rose-700">Analysis run not found.</div>;
+    return <div className="text-rose-400">Analysis run not found.</div>;
   }
 
   if (runQuery.data.status !== "completed") {
     return (
-      <Card className="bg-white/80">
+      <Card className="border-white/10 bg-card/70 backdrop-blur">
         <CardContent className="p-6">
           Анализ сейчас в статусе <strong>{runQuery.data.status}</strong>. Страница обновится автоматически.
         </CardContent>
@@ -48,11 +48,7 @@ export default function ReportPage({ params }: { params: { projectId: string; re
 
       <div className="grid gap-5 xl:grid-cols-2">
         <TopicsCard topics={report.topics} />
-        <ReportSummaryCard
-          summaryText={reportQuery.data.summary_text}
-          meta={report.meta}
-          stats={report.stats}
-        />
+        <ReportSummaryCard summaryText={reportQuery.data.summary_text} meta={report.meta} stats={report.stats} />
       </div>
 
       <div className="grid gap-5 xl:grid-cols-3">

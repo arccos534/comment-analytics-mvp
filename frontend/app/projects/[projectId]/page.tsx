@@ -42,11 +42,11 @@ export default function ProjectOverviewPage({ params }: { params: { projectId: s
 
 function Metric({ title, value }: { title: string; value: number }) {
   return (
-    <Card className="bg-white/80">
-      <CardHeader>
-        <CardTitle>{title}</CardTitle>
+    <Card className="overflow-hidden border-white/10 bg-card/70 backdrop-blur">
+      <CardHeader className="pb-4">
+        <CardTitle className="text-base text-muted-foreground">{title}</CardTitle>
       </CardHeader>
-      <CardContent className="text-4xl font-semibold">{value}</CardContent>
+      <CardContent className="pb-6 text-5xl font-semibold tracking-tight">{value}</CardContent>
     </Card>
   );
 }

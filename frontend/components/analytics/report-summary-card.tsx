@@ -18,7 +18,7 @@ export function ReportSummaryCard({
   };
 }) {
   return (
-    <Card className="bg-white/80">
+    <Card className="border-white/10 bg-card/70 backdrop-blur">
       <CardHeader>
         <CardTitle>Executive summary</CardTitle>
       </CardHeader>
@@ -43,7 +43,7 @@ export function ReportSummaryCard({
 
 function InfoItem({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-xl bg-muted px-3 py-3">
+    <div className="rounded-xl border border-border/60 bg-background/55 px-3 py-3">
       <div className="text-xs uppercase tracking-wide text-muted-foreground">{label}</div>
       <div className="mt-1 font-medium">{value}</div>
     </div>

@@ -6,7 +6,7 @@ import { SourceStatusBadge } from "./source-status-badge";
 
 export function SourceTable({ sources }: { sources: Source[] }) {
   return (
-    <div className="overflow-hidden rounded-2xl border bg-white/80">
+    <div className="overflow-hidden rounded-2xl border border-white/10 bg-card/70 backdrop-blur">
       <Table>
         <TableHeader>
           <TableRow>
