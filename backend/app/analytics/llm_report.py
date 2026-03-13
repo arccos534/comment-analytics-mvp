@@ -41,14 +41,17 @@ class SummaryGenerator:
                 completion = client.chat.completions.create(
                     model=self.settings.openai_compatible_model,
                     temperature=0,
-                    max_tokens=220,
+                    max_tokens=260,
                     messages=[
                         {
                             "role": "system",
                             "content": (
-                                "Сформируй короткое деловое резюме отчета по комментариям. "
-                                "Theme и keywords относятся к постам и новостям, prompt задает фокус анализа комментариев. "
-                                "Не придумывай факты, не повторяй лишние цифры, ответ дай на русском в 3-4 предложениях."
+                                "Ты аналитик пользовательской реакции. "
+                                "Ответь на запрос пользователя одним четким, полезным и деловым текстом на русском языке. "
+                                "Не используй фиксированный шаблон и не выдумывай обязательные блоки. "
+                                "Если подзаголовки действительно помогают, добавь их сам, но только при необходимости. "
+                                "Главное: прямо ответь на prompt, опирайся только на данные отчета, отмечай ограничения выборки только если они реально мешают уверенным выводам. "
+                                "Избегай воды, общих фраз и повторения цифр без смысла."
                             ),
                         },
                         {
@@ -57,14 +60,14 @@ class SummaryGenerator:
                         },
                     ],
                 )
-                content = completion.choices[0].message.content
+                content = (completion.choices[0].message.content or "").strip()
                 if content:
                     self.redis.setex(cache_key, self.settings.llm_summary_cache_ttl_seconds, content)
                     return content
             except Exception:
                 logger.exception("LLM summary generation failed")
 
-        return self._build_fallback_summary(report_json)
+        return self._build_fallback_summary(report_json, prompt_text)
 
     def _build_cache_key(self, summary_payload: dict) -> str:
         digest = hashlib.sha256(
@@ -94,14 +97,26 @@ class SummaryGenerator:
             },
         }
 
-    def _build_fallback_summary(self, report_json: dict) -> str:
+    def _build_fallback_summary(self, report_json: dict, prompt_text: str | None = None) -> str:
+        stats = report_json.get("stats", {})
         sentiment = report_json.get("sentiment", {})
         topics = report_json.get("topics", [])
+
+        total_posts = int(stats.get("total_posts", 0) or 0)
+        analyzed_comments = int(stats.get("analyzed_comments", 0) or 0)
         lead_topic = topics[0]["name"] if topics else "общая реакция"
+
+        if analyzed_comments <= 0:
+            return "По выбранной теме и заданному запросу не нашлось достаточного количества релевантных комментариев для уверенного вывода."
+
+        limitations = ""
+        if total_posts < 3 or analyzed_comments < 20:
+            limitations = " Выборка небольшая, поэтому выводы стоит считать предварительными."
+
+        prompt_part = f"По запросу «{prompt_text.strip()}» " if prompt_text and prompt_text.strip() else ""
         return (
-            f"Отчет собран по теме постов '{lead_topic}'. "
-            f"Позитив: {sentiment.get('positive_percent', 0)}%, "
-            f"негатив: {sentiment.get('negative_percent', 0)}%, "
-            f"нейтрально: {sentiment.get('neutral_percent', 0)}%. "
-            "Основные выводы доступны в структурированном отчете ниже."
+            f"{prompt_part}основной массив обсуждений связан с темой «{lead_topic}». "
+            f"Распределение тональности выглядит так: позитив {sentiment.get('positive_percent', 0)}%, "
+            f"негатив {sentiment.get('negative_percent', 0)}%, нейтрально {sentiment.get('neutral_percent', 0)}%."
+            f"{limitations}"
         )

@@ -78,12 +78,7 @@ export interface ReportSnapshot {
       top_unpopular: ReportPost[];
     };
     summary: {
-      focus?: string;
-      answer_to_prompt?: string;
-      what_audience_likes?: string[];
-      what_audience_dislikes?: string[];
-      interest_drivers?: string[];
-      limitations?: string[];
+      overview?: string;
     };
   };
   summary_text: string | null;
