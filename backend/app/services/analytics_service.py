@@ -103,8 +103,8 @@ class AnalyticsService:
         if any(marker in text for marker in ad_markers):
             return True
 
-        links_count = len(re.findall(r"https?://|www\\.", text))
-        phone_count = len(re.findall(r"(?:\\+7|8)[\\s\\-(]*\\d", text))
+        links_count = len(re.findall(r"https?://|www\.", text))
+        phone_count = len(re.findall(r"(?:\+7|8)[\s()\-]*\d", text))
         cta_markers = sum(
             1
             for marker in {"по ссылке", "звоните", "подробнее", "стоимость", "цены", "в наличии", "вопросы по телефону"}
