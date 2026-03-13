@@ -61,8 +61,8 @@ export interface ReportSnapshot {
       neutral_comments: ReportComment[];
     };
     posts: {
-      top_positive: ReportPost[];
-      top_negative: ReportPost[];
+      top_popular: ReportPost[];
+      top_unpopular: ReportPost[];
     };
     summary: {
       highlights: string[];

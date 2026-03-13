@@ -15,9 +15,9 @@ class ReportAggregator:
                 "post_id": None,
                 "post_url": "",
                 "post_text": None,
-                "positive": 0,
-                "negative": 0,
                 "comments_count": 0,
+                "likes_count": 0,
+                "views_count": 0,
             }
         )
 
@@ -28,10 +28,8 @@ class ReportAggregator:
             bucket["post_url"] = post.post_url
             bucket["post_text"] = post.post_text
             bucket["comments_count"] += 1
-            if item["sentiment"] == "positive":
-                bucket["positive"] += 1
-            if item["sentiment"] == "negative":
-                bucket["negative"] += 1
+            bucket["likes_count"] = getattr(post, "likes_count", 0)
+            bucket["views_count"] = getattr(post, "views_count", 0)
 
         total_comments = len(working_set)
         total_posts = len({str(item["post"].id) for item in working_set})
@@ -42,18 +40,24 @@ class ReportAggregator:
             for name, count in topic_counter.most_common(6)
         ]
 
-        liked_patterns = [name for name, count in topic_counter.items() if count >= 2 and "negative" not in name.lower()][:4]
-        disliked_patterns = []
-        if any(item["sentiment"] == "negative" for item in working_set):
-            disliked_patterns = [
+        liked_patterns = [
+            keyword
+            for keyword, _ in Counter(
                 keyword
-                for keyword, count in Counter(
-                    keyword
-                    for item in working_set
-                    if item["sentiment"] == "negative"
-                    for keyword in item["keywords"]
-                ).most_common(4)
-            ]
+                for item in working_set
+                if item["sentiment"] == "positive"
+                for keyword in item["keywords"]
+            ).most_common(4)
+        ]
+        disliked_patterns = [
+            keyword
+            for keyword, _ in Counter(
+                keyword
+                for item in working_set
+                if item["sentiment"] == "negative"
+                for keyword in item["keywords"]
+            ).most_common(4)
+        ]
 
         examples = {
             "positive_comments": self._pick_examples(working_set, "positive"),
@@ -61,35 +65,25 @@ class ReportAggregator:
             "neutral_comments": self._pick_examples(working_set, "neutral"),
         }
 
-        top_positive = sorted(
-            (
-                {
-                    "post_id": value["post_id"],
-                    "post_url": value["post_url"],
-                    "post_text": value["post_text"],
-                    "score": round(value["positive"] / max(value["comments_count"], 1), 2),
-                    "comments_count": value["comments_count"],
-                }
-                for value in post_scores.values()
-            ),
-            key=lambda item: (item["score"], item["comments_count"]),
-            reverse=True,
-        )[:5]
+        def popularity_score(value: dict) -> float:
+            comments_score = value["comments_count"] * 3
+            likes_score = value["likes_count"]
+            views_score = min(value["views_count"] / 100, 50)
+            return round(comments_score + likes_score + views_score, 2)
 
-        top_negative = sorted(
-            (
-                {
-                    "post_id": value["post_id"],
-                    "post_url": value["post_url"],
-                    "post_text": value["post_text"],
-                    "score": round(value["negative"] / max(value["comments_count"], 1), 2),
-                    "comments_count": value["comments_count"],
-                }
-                for value in post_scores.values()
-            ),
-            key=lambda item: (item["score"], item["comments_count"]),
-            reverse=True,
-        )[:5]
+        post_items = [
+            {
+                "post_id": value["post_id"],
+                "post_url": value["post_url"],
+                "post_text": value["post_text"],
+                "score": popularity_score(value),
+                "comments_count": value["comments_count"],
+            }
+            for value in post_scores.values()
+        ]
+
+        popular_posts = sorted(post_items, key=lambda item: (item["score"], item["comments_count"]), reverse=True)[:5]
+        unpopular_posts = sorted(post_items, key=lambda item: (item["score"], item["comments_count"]))[:5]
 
         report = {
             "meta": {
@@ -114,17 +108,17 @@ class ReportAggregator:
             },
             "topics": topics,
             "insights": {
-                "liked_patterns": liked_patterns or ["Скорость и удобство"],
-                "disliked_patterns": disliked_patterns or ["Цена", "Нестабильность качества"],
+                "liked_patterns": liked_patterns,
+                "disliked_patterns": disliked_patterns,
             },
             "examples": examples,
             "posts": {
-                "top_positive": top_positive,
-                "top_negative": top_negative,
+                "top_popular": popular_posts,
+                "top_unpopular": unpopular_posts,
             },
             "summary": {
-                "highlights": [f"Преобладающая тема: {topics[0]['name']}" if topics else "Данных недостаточно"],
-                "risks": disliked_patterns[:3] or ["Нужно больше негативных кейсов для анализа"],
+                "highlights": [f"Преобладающая тема обсуждения: {topics[0]['name']}" if topics else "Данных по выбранной теме недостаточно"],
+                "risks": disliked_patterns[:3],
                 "recommendations": self._build_recommendations(liked_patterns, disliked_patterns),
             },
         }
@@ -156,9 +150,9 @@ class ReportAggregator:
     def _build_recommendations(self, liked_patterns: list[str], disliked_patterns: list[str]) -> list[str]:
         recommendations: list[str] = []
         if liked_patterns:
-            recommendations.append(f"Усиливать коммуникацию вокруг темы '{liked_patterns[0]}'.")
+            recommendations.append(f"Усилить коммуникацию вокруг темы '{liked_patterns[0]}'.")
         if disliked_patterns:
-            recommendations.append(f"Подготовить ответ на претензии по теме '{disliked_patterns[0]}'.")
+            recommendations.append(f"Подготовить ответ на повторяющиеся претензии по теме '{disliked_patterns[0]}'.")
         if not recommendations:
-            recommendations.append("Собрать больше релевантных комментариев по выбранной теме.")
+            recommendations.append("Собрать больше релевантных комментариев по выбранной теме постов.")
         return recommendations

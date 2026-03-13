@@ -63,8 +63,8 @@ export default function ReportPage({ params }: { params: { projectId: string; re
       </div>
 
       <div className="grid gap-5 xl:grid-cols-2">
-        <TopPostsCard title="Top positive posts" posts={report.posts.top_positive} />
-        <TopPostsCard title="Top negative posts" posts={report.posts.top_negative} />
+        <TopPostsCard title="Top popular posts" posts={report.posts.top_popular} />
+        <TopPostsCard title="Top unpopular posts" posts={report.posts.top_unpopular} />
       </div>
     </div>
   );
