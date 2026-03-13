@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import re
 from uuid import UUID
 
@@ -19,6 +20,8 @@ from app.repositories.project_repository import ProjectRepository
 from app.schemas.analytics import AnalysisCreateRequest
 from app.services.report_service import ReportService
 from app.utils.dates import utcnow
+
+logger = logging.getLogger(__name__)
 
 
 class AnalyticsService:
@@ -199,5 +202,6 @@ class AnalyticsService:
             self.analysis_repo.update_run_status(run.id, AnalysisRunStatusEnum.completed, finished_at=utcnow())
             return {"status": "completed", "analysis_run_id": str(run.id)}
         except Exception:
+            logger.exception("Analytics run failed", extra={"analysis_run_id": str(run.id), "project_id": str(run.project_id)})
             self.analysis_repo.update_run_status(run.id, AnalysisRunStatusEnum.failed, finished_at=utcnow())
             return {"status": "failed", "analysis_run_id": str(run.id)}
