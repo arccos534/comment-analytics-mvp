@@ -1,9 +1,9 @@
 "use client";
 
 import { Header } from "@/components/layout/header";
+import { IndexingControls } from "@/components/sources/indexing-controls";
 import { SourceInputForm } from "@/components/sources/source-input-form";
 import { SourceTable } from "@/components/sources/source-table";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useIndexStatus, useSources, useStartIndexing } from "@/hooks/use-sources";
 
@@ -14,16 +14,14 @@ export default function ProjectSourcesPage({ params }: { params: { projectId: st
 
   return (
     <div className="space-y-8">
-      <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-        <Header title="Sources" subtitle="Валидируйте ссылки, сохраняйте источники и запускайте индексацию." />
-        <Button onClick={() => startIndexing.mutate()} disabled={startIndexing.isPending || !sources.length}>
-          {startIndexing.isPending ? "Indexing..." : "Start indexing"}
-        </Button>
-      </div>
+      <Header
+        title="Sources"
+        subtitle="Валидируйте ссылки, сохраняйте источники и запускайте индексацию с нужным охватом."
+      />
 
       <div className="grid gap-5 xl:grid-cols-[1.05fr_0.95fr]">
         <SourceInputForm projectId={params.projectId} />
-        <Card className="bg-white/80">
+        <Card className="bg-white/5">
           <CardHeader>
             <CardTitle>Index status</CardTitle>
           </CardHeader>
@@ -40,6 +38,12 @@ export default function ProjectSourcesPage({ params }: { params: { projectId: st
           </CardContent>
         </Card>
       </div>
+
+      <IndexingControls
+        disabled={!sources.length}
+        isPending={startIndexing.isPending}
+        onStart={(payload) => startIndexing.mutate(payload)}
+      />
 
       {isLoading ? <div>Loading sources...</div> : <SourceTable sources={sources} />}
     </div>

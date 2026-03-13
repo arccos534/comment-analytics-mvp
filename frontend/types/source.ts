@@ -45,3 +45,14 @@ export interface IndexStatusResponse {
     last_indexed_at: string | null;
   }>;
 }
+
+export type IndexMode = "full" | "latest_posts" | "preset_period" | "custom_period";
+export type IndexPeriodPreset = "day" | "week" | "month" | "three_months" | "six_months" | "year";
+
+export interface StartIndexingPayload {
+  mode: IndexMode;
+  latest_posts_limit?: number | null;
+  period_preset?: IndexPeriodPreset | null;
+  period_from?: string | null;
+  period_to?: string | null;
+}

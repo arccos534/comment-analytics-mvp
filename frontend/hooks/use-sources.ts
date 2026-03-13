@@ -3,7 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { api } from "@/lib/api";
-import { Source, SourceStatus } from "@/types/source";
+import { Source, SourceStatus, StartIndexingPayload } from "@/types/source";
 
 function hasActiveSourceStatuses(sources: Source[] | undefined) {
   if (!sources?.length) {
@@ -55,10 +55,11 @@ export function useValidateSources() {
 export function useStartIndexing(projectId: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: () => api.startIndexing(projectId),
+    mutationFn: (payload: StartIndexingPayload) => api.startIndexing(projectId, payload),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["sources", projectId] });
       queryClient.invalidateQueries({ queryKey: ["projects", projectId] });
+      queryClient.invalidateQueries({ queryKey: ["index-status", projectId] });
     }
   });
 }

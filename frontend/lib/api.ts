@@ -1,6 +1,6 @@
 import { AnalysisCreatePayload, AnalysisRun, ReportSnapshot } from "@/types/analytics";
 import { Project, ProjectDetail } from "@/types/project";
-import { IndexStatusResponse, Source, SourceBulkCreateResponse, SourceValidationResult } from "@/types/source";
+import { IndexStatusResponse, Source, SourceBulkCreateResponse, SourceValidationResult, StartIndexingPayload } from "@/types/source";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000/api/v1";
 
@@ -39,8 +39,11 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ urls })
     }),
-  startIndexing: (projectId: string) =>
-    apiFetch<{ status: string; task_id: string }>(`/projects/${projectId}/index`, { method: "POST" }),
+  startIndexing: (projectId: string, payload: StartIndexingPayload) =>
+    apiFetch<{ status: string; task_id: string }>(`/projects/${projectId}/index`, {
+      method: "POST",
+      body: JSON.stringify(payload)
+    }),
   getIndexStatus: (projectId: string) => apiFetch<IndexStatusResponse>(`/projects/${projectId}/index-status`),
   runAnalysis: (projectId: string, payload: AnalysisCreatePayload) =>
     apiFetch<AnalysisRun>(`/projects/${projectId}/analyze`, {

@@ -58,10 +58,10 @@ class TelegramProvider(BaseProvider):
             result.reason = str(exc)
             return result
 
-    def fetch_posts(self, source, since=None) -> list[NormalizedPost]:
+    def fetch_posts(self, source, since=None, until=None, limit=None) -> list[NormalizedPost]:
         if self.context.demo_mode:
             return self._fetch_demo_posts(source, since=since)
-        return self._run(self._fetch_posts_live(source, since=since))
+        return self._run(self._fetch_posts_live(source, since=since, until=until, limit=limit))
 
     def fetch_comments(self, source, post: NormalizedPost) -> list[NormalizedComment]:
         if self.context.demo_mode:
@@ -85,8 +85,15 @@ class TelegramProvider(BaseProvider):
             result.title = f"{getattr(entity, 'title', slug)} post {post_id}"
             return result
 
-    async def _fetch_posts_live(self, source, since: datetime | None = None) -> list[NormalizedPost]:
+    async def _fetch_posts_live(
+        self,
+        source,
+        since: datetime | None = None,
+        until: datetime | None = None,
+        limit: int | None = None,
+    ) -> list[NormalizedPost]:
         since_dt = since.astimezone(UTC) if since else None
+        until_dt = until.astimezone(UTC) if until else None
         async with self._make_client() as client:
             if source.source_type == SourceTypeEnum.post:
                 slug, post_id = self._parse_post_url(source.external_source_id)
@@ -95,6 +102,8 @@ class TelegramProvider(BaseProvider):
                 if not message:
                     return []
                 if since_dt and message.date and message.date <= since_dt:
+                    return []
+                if until_dt and message.date and message.date > until_dt:
                     return []
                 normalized = self._normalize_post(source, entity, message)
                 return [normalized] if normalized else []
@@ -105,9 +114,13 @@ class TelegramProvider(BaseProvider):
                 normalized = self._normalize_post(source, entity, message)
                 if not normalized:
                     continue
+                if until_dt and normalized.post_date > until_dt:
+                    continue
                 if since_dt and normalized.post_date <= since_dt:
                     break
                 posts.append(normalized)
+                if limit and len(posts) >= limit:
+                    break
             return posts
 
     async def _fetch_comments_live(self, source, post: NormalizedPost) -> list[NormalizedComment]:

@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from uuid import UUID
 
 from sqlalchemy.orm import Session
@@ -10,6 +10,7 @@ from app.repositories.comment_repository import CommentRepository
 from app.repositories.post_repository import PostRepository
 from app.repositories.project_repository import ProjectRepository
 from app.repositories.source_repository import SourceRepository
+from app.schemas.source import IndexModeEnum, IndexPeriodPresetEnum, IndexRequest
 from app.utils.dates import utcnow
 
 
@@ -24,18 +25,24 @@ class IngestionService:
     def project_exists(self, project_id: UUID) -> bool:
         return self.projects.exists(project_id)
 
-    def enqueue_project_index(self, project_id: UUID) -> str:
+    def enqueue_project_index(self, project_id: UUID, request: IndexRequest | None = None) -> str:
         settings = get_settings()
+        since, until, posts_limit = self._resolve_index_window(request or IndexRequest())
         if settings.demo_mode or not settings.background_jobs_enabled:
-            self.index_project_sources_sync(project_id)
+            self.index_project_sources_sync(project_id, since=since, until=until, posts_limit=posts_limit)
             return "sync-inline"
         try:
             from app.tasks.ingestion_tasks import index_project_sources_task
 
-            task = index_project_sources_task.delay(str(project_id))
+            task = index_project_sources_task.delay(
+                str(project_id),
+                since.isoformat() if since else None,
+                until.isoformat() if until else None,
+                posts_limit,
+            )
             return task.id
         except Exception:
-            self.index_project_sources_sync(project_id)
+            self.index_project_sources_sync(project_id, since=since, until=until, posts_limit=posts_limit)
             return "sync-fallback"
 
     def get_project_index_status(self, project_id: UUID) -> dict:
@@ -59,16 +66,28 @@ class IngestionService:
             ],
         }
 
-    def index_project_sources_sync(self, project_id: UUID, since: datetime | None = None) -> dict:
+    def index_project_sources_sync(
+        self,
+        project_id: UUID,
+        since: datetime | None = None,
+        until: datetime | None = None,
+        posts_limit: int | None = None,
+    ) -> dict:
         stats = {"sources": 0, "posts": 0, "comments": 0}
         for source in self.sources.list_by_project(project_id):
-            result = self.index_single_source_sync(source.id, since=since)
+            result = self.index_single_source_sync(source.id, since=since, until=until, posts_limit=posts_limit)
             stats["sources"] += 1
             stats["posts"] += result["posts"]
             stats["comments"] += result["comments"]
         return stats
 
-    def index_single_source_sync(self, source_id: UUID, since: datetime | None = None) -> dict:
+    def index_single_source_sync(
+        self,
+        source_id: UUID,
+        since: datetime | None = None,
+        until: datetime | None = None,
+        posts_limit: int | None = None,
+    ) -> dict:
         source = self.sources.get(source_id)
         if not source:
             return {"posts": 0, "comments": 0}
@@ -80,7 +99,7 @@ class IngestionService:
             # A manual project reindex should rebuild the full source history unless
             # the caller explicitly requests an incremental sync via `since`.
             effective_since = since
-            posts = provider.fetch_posts(source, since=effective_since)
+            posts = provider.fetch_posts(source, since=effective_since, until=until, limit=posts_limit)
             persisted_posts = self.posts.upsert_posts(source.id, posts)
 
             total_comments = 0
@@ -97,3 +116,21 @@ class IngestionService:
             source.status = SourceStatusEnum.failed
             self.sources.update(source)
             return {"posts": 0, "comments": 0}
+
+    def _resolve_index_window(self, request: IndexRequest) -> tuple[datetime | None, datetime | None, int | None]:
+        now = utcnow()
+        if request.mode == IndexModeEnum.latest_posts:
+            return None, None, request.latest_posts_limit
+        if request.mode == IndexModeEnum.preset_period:
+            since_map = {
+                IndexPeriodPresetEnum.day: now - timedelta(days=1),
+                IndexPeriodPresetEnum.week: now - timedelta(weeks=1),
+                IndexPeriodPresetEnum.month: now - timedelta(days=30),
+                IndexPeriodPresetEnum.three_months: now - timedelta(days=90),
+                IndexPeriodPresetEnum.six_months: now - timedelta(days=180),
+                IndexPeriodPresetEnum.year: now - timedelta(days=365),
+            }
+            return since_map[request.period_preset], now, None
+        if request.mode == IndexModeEnum.custom_period:
+            return request.period_from, request.period_to, None
+        return None, None, None

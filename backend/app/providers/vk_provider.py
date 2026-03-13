@@ -45,10 +45,10 @@ class VkProvider(BaseProvider):
             result.reason = str(exc)
             return result
 
-    def fetch_posts(self, source, since=None) -> list[NormalizedPost]:
+    def fetch_posts(self, source, since=None, until=None, limit=None) -> list[NormalizedPost]:
         if self.context.demo_mode:
             return self._fetch_demo_posts(source, since=since)
-        return self._fetch_posts_live(source, since=since)
+        return self._fetch_posts_live(source, since=since, until=until, limit=limit)
 
     def fetch_comments(self, source, post: NormalizedPost) -> list[NormalizedComment]:
         if self.context.demo_mode:
@@ -69,20 +69,29 @@ class VkProvider(BaseProvider):
         result.title = self._build_post_title(post)
         return result
 
-    def _fetch_posts_live(self, source, since: datetime | None = None) -> list[NormalizedPost]:
+    def _fetch_posts_live(
+        self,
+        source,
+        since: datetime | None = None,
+        until: datetime | None = None,
+        limit: int | None = None,
+    ) -> list[NormalizedPost]:
         self._ensure_token()
         since_dt = since.astimezone(UTC) if since else None
+        until_dt = until.astimezone(UTC) if until else None
         if source.source_type == SourceTypeEnum.post:
             owner_id, post_id = self._parse_vk_post_id(source.external_source_id)
             items = self._api_call("wall.getById", {"posts": f"wall{owner_id}_{post_id}"})
         else:
             owner_id = int(source.external_source_id)
-            items = self._fetch_all_wall_posts(owner_id, since_dt)
+            items = self._fetch_all_wall_posts(owner_id, since_dt, until_dt, limit)
 
         posts: list[NormalizedPost] = []
         for item in items:
             post_date = datetime.fromtimestamp(item["date"], tz=UTC)
             if since_dt and post_date <= since_dt:
+                continue
+            if until_dt and post_date > until_dt:
                 continue
             posts.append(self._normalize_post(item))
         return posts
@@ -250,7 +259,13 @@ class VkProvider(BaseProvider):
             return text[:120]
         return f"VK post wall{post['owner_id']}_{post['id']}"
 
-    def _fetch_all_wall_posts(self, owner_id: int, since_dt: datetime | None) -> list[dict[str, Any]]:
+    def _fetch_all_wall_posts(
+        self,
+        owner_id: int,
+        since_dt: datetime | None,
+        until_dt: datetime | None,
+        limit: int | None,
+    ) -> list[dict[str, Any]]:
         page_size = max(1, min(self.settings.ingestion_batch_size, 100))
         offset = 0
         items: list[dict[str, Any]] = []
@@ -271,12 +286,17 @@ class VkProvider(BaseProvider):
                 break
 
             for item in batch:
+                post_date = datetime.fromtimestamp(item["date"], tz=UTC)
+                if until_dt and post_date > until_dt:
+                    continue
                 if since_dt:
-                    post_date = datetime.fromtimestamp(item["date"], tz=UTC)
                     if post_date <= since_dt:
                         should_stop = True
                         break
                 items.append(item)
+                if limit and len(items) >= limit:
+                    should_stop = True
+                    break
 
             offset += len(batch)
             if len(batch) < page_size:

@@ -74,7 +74,13 @@ class BaseProvider(ABC):
     def validate_source(self, url: str) -> ProviderValidationResult: ...
 
     @abstractmethod
-    def fetch_posts(self, source, since: datetime | None = None) -> list[NormalizedPost]: ...
+    def fetch_posts(
+        self,
+        source,
+        since: datetime | None = None,
+        until: datetime | None = None,
+        limit: int | None = None,
+    ) -> list[NormalizedPost]: ...
 
     @abstractmethod
     def fetch_comments(self, source, post: NormalizedPost) -> list[NormalizedComment]: ...
