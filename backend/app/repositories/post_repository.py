@@ -27,10 +27,20 @@ class PostRepository:
             select(Post).where(Post.source_id == source_id, Post.external_post_id == external_post_id)
         )
 
+    def get_by_source_and_external_ids(self, source_id: UUID, external_post_ids: list[str]) -> dict[str, Post]:
+        if not external_post_ids:
+            return {}
+        stmt = select(Post).where(Post.source_id == source_id, Post.external_post_id.in_(external_post_ids))
+        return {post.external_post_id: post for post in self.db.scalars(stmt)}
+
     def upsert_posts(self, source_id: UUID, normalized_posts: list[NormalizedPost]) -> list[Post]:
         persisted: list[Post] = []
+        existing = self.get_by_source_and_external_ids(
+            source_id,
+            [normalized.external_post_id for normalized in normalized_posts],
+        )
         for normalized in normalized_posts:
-            post = self.get_by_source_and_external_id(source_id, normalized.external_post_id)
+            post = existing.get(normalized.external_post_id)
             if not post:
                 post = Post(
                     source_id=source_id,
@@ -53,9 +63,7 @@ class PostRepository:
                 post.comments_count = normalized.comments_count
                 post.raw_payload = normalized.raw_payload
             persisted.append(post)
-        self.db.commit()
-        for post in persisted:
-            self.db.refresh(post)
+        self.db.flush()
         return persisted
 
     def latest_post_date_for_source(self, source_id: UUID) -> datetime | None:

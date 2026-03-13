@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -58,17 +59,18 @@ class VkProvider(BaseProvider):
 
     def _validate_live(self, result: ProviderValidationResult) -> ProviderValidationResult:
         self._ensure_token()
-        if result.source_type == SourceTypeEnum.community:
-            group = self._resolve_group(result.external_source_id or result.normalized_url or result.url)
-            result.external_source_id = str(-abs(group["id"]))
-            result.title = group["name"]
-            return result
+        with self._make_http_client() as client:
+            if result.source_type == SourceTypeEnum.community:
+                group = self._resolve_group(result.external_source_id or result.normalized_url or result.url, client=client)
+                result.external_source_id = str(-abs(group["id"]))
+                result.title = group["name"]
+                return result
 
-        owner_id, post_id = self._parse_vk_post_id(result.external_source_id)
-        post = self._api_call("wall.getById", {"posts": f"wall{owner_id}_{post_id}"})[0]
-        result.external_source_id = f"{owner_id}_{post_id}"
-        result.title = self._build_post_title(post)
-        return result
+            owner_id, post_id = self._parse_vk_post_id(result.external_source_id)
+            post = self._api_call("wall.getById", {"posts": f"wall{owner_id}_{post_id}"}, client=client)[0]
+            result.external_source_id = f"{owner_id}_{post_id}"
+            result.title = self._build_post_title(post)
+            return result
 
     def _fetch_posts_live(
         self,
@@ -80,12 +82,13 @@ class VkProvider(BaseProvider):
         self._ensure_token()
         since_dt = since.astimezone(UTC) if since else None
         until_dt = until.astimezone(UTC) if until else None
-        if source.source_type == SourceTypeEnum.post:
-            owner_id, post_id = self._parse_vk_post_id(source.external_source_id)
-            items = self._api_call("wall.getById", {"posts": f"wall{owner_id}_{post_id}"})
-        else:
-            owner_id = int(source.external_source_id)
-            items = self._fetch_all_wall_posts(owner_id, since_dt, until_dt, limit)
+        with self._make_http_client() as client:
+            if source.source_type == SourceTypeEnum.post:
+                owner_id, post_id = self._parse_vk_post_id(source.external_source_id)
+                items = self._api_call("wall.getById", {"posts": f"wall{owner_id}_{post_id}"}, client=client)
+            else:
+                owner_id = int(source.external_source_id)
+                items = self._fetch_all_wall_posts(owner_id, since_dt, until_dt, limit, client=client)
 
         posts: list[NormalizedPost] = []
         for item in items:
@@ -100,7 +103,8 @@ class VkProvider(BaseProvider):
     def _fetch_comments_live(self, source, post: NormalizedPost) -> list[NormalizedComment]:
         self._ensure_token()
         owner_id, post_id = self._owner_and_post_id(source, post)
-        items, profiles, groups = self._fetch_all_post_comments(owner_id, post_id)
+        with self._make_http_client() as client:
+            items, profiles, groups = self._fetch_all_post_comments(owner_id, post_id, client=client)
 
         comments: list[NormalizedComment] = []
         for item in items:
@@ -189,11 +193,16 @@ class VkProvider(BaseProvider):
             raw_payload={"provider": "vk", "demo": False, "owner_id": owner_id, "post_id": post_id},
         )
 
-    def _resolve_group(self, slug: str) -> dict[str, Any]:
-        resolved = self._api_call("utils.resolveScreenName", {"screen_name": slug})
+    @contextmanager
+    def _make_http_client(self):
+        with httpx.Client(timeout=self.settings.provider_http_timeout_seconds) as client:
+            yield client
+
+    def _resolve_group(self, slug: str, client: httpx.Client | None = None) -> dict[str, Any]:
+        resolved = self._api_call("utils.resolveScreenName", {"screen_name": slug}, client=client)
         if not resolved or resolved.get("type") not in {"group", "page", "event"}:
             raise ProviderRequestError("VK source is not a public community")
-        groups = self._api_call("groups.getById", {"group_ids": resolved["object_id"]})
+        groups = self._api_call("groups.getById", {"group_ids": resolved["object_id"]}, client=client)
         if isinstance(groups, dict) and "groups" in groups:
             groups = groups["groups"]
         if isinstance(groups, dict):
@@ -202,7 +211,7 @@ class VkProvider(BaseProvider):
             raise ProviderRequestError("VK group metadata not found")
         return groups[0]
 
-    def _api_call(self, method: str, params: dict[str, Any]) -> Any:
+    def _api_call(self, method: str, params: dict[str, Any], client: httpx.Client | None = None) -> Any:
         self._ensure_token()
         query = {
             **params,
@@ -210,7 +219,10 @@ class VkProvider(BaseProvider):
             "v": self.settings.vk_api_version,
         }
         attempts = 5
-        with httpx.Client(timeout=self.settings.provider_http_timeout_seconds) as client:
+        if client is None:
+            with self._make_http_client() as managed_client:
+                return self._api_call(method, params, client=managed_client)
+        else:
             for attempt in range(attempts):
                 response = client.get(f"https://api.vk.com/method/{method}", params=query)
                 response.raise_for_status()
@@ -275,6 +287,7 @@ class VkProvider(BaseProvider):
         since_dt: datetime | None,
         until_dt: datetime | None,
         limit: int | None,
+        client: httpx.Client,
     ) -> list[dict[str, Any]]:
         page_size = max(1, min(self.settings.ingestion_batch_size, 100))
         offset = 0
@@ -290,6 +303,7 @@ class VkProvider(BaseProvider):
                     "offset": offset,
                     "filter": "owner",
                 },
+                client=client,
             )
             batch = response.get("items", [])
             if not batch:
@@ -318,6 +332,7 @@ class VkProvider(BaseProvider):
         self,
         owner_id: int,
         post_id: int,
+        client: httpx.Client,
     ) -> tuple[list[dict[str, Any]], dict[int, dict[str, Any]], dict[int, dict[str, Any]]]:
         page_size = max(1, min(self.settings.ingestion_batch_size, 100))
         offset = 0
@@ -337,6 +352,7 @@ class VkProvider(BaseProvider):
                     "extended": 1,
                     "thread_items_count": 10,
                 },
+                client=client,
             )
             batch = response.get("items", [])
             if not batch:
@@ -359,6 +375,7 @@ class VkProvider(BaseProvider):
                         post_id,
                         item["id"],
                         initial_offset=len(thread_items),
+                        client=client,
                     )
                     items.extend(nested_items)
                     profiles.update(nested_profiles)
@@ -376,6 +393,7 @@ class VkProvider(BaseProvider):
         post_id: int,
         comment_id: int,
         initial_offset: int = 0,
+        client: httpx.Client | None = None,
     ) -> tuple[list[dict[str, Any]], dict[int, dict[str, Any]], dict[int, dict[str, Any]]]:
         page_size = max(1, min(self.settings.ingestion_batch_size, 100))
         offset = initial_offset
@@ -395,6 +413,7 @@ class VkProvider(BaseProvider):
                     "sort": "asc",
                     "extended": 1,
                 },
+                client=client,
             )
             batch = response.get("items", [])
             if not batch:

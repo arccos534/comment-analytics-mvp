@@ -30,14 +30,20 @@ class CommentRepository:
             select(Comment).where(Comment.post_id == post_id, Comment.external_comment_id == external_comment_id)
         )
 
+    def get_by_post_and_external_ids(self, post_id: UUID, external_comment_ids: list[str]) -> dict[str, Comment]:
+        if not external_comment_ids:
+            return {}
+        stmt = select(Comment).where(Comment.post_id == post_id, Comment.external_comment_id.in_(external_comment_ids))
+        return {comment.external_comment_id: comment for comment in self.db.scalars(stmt)}
+
     def upsert_comments(self, post_id: UUID, normalized_comments: list[NormalizedComment]) -> list[Comment]:
         persisted: list[Comment] = []
-        comment_map = {
-            comment.external_comment_id: self.get_by_post_and_external_id(post_id, comment.external_comment_id)
-            for comment in normalized_comments
-        }
+        comment_map = self.get_by_post_and_external_ids(
+            post_id,
+            [comment.external_comment_id for comment in normalized_comments],
+        )
         for normalized in normalized_comments:
-            comment = comment_map[normalized.external_comment_id]
+            comment = comment_map.get(normalized.external_comment_id)
             if not comment:
                 comment = Comment(
                     post_id=post_id,
@@ -62,9 +68,7 @@ class CommentRepository:
                 comment.reply_count = normalized.reply_count
                 comment.raw_payload = normalized.raw_payload
             persisted.append(comment)
-        self.db.commit()
-        for comment in persisted:
-            self.db.refresh(comment)
+        self.db.flush()
         return persisted
 
     def build_analysis_query(

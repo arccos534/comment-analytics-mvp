@@ -52,15 +52,18 @@ class IngestionService:
             self.index_project_sources_sync(project_id, since=since, until=until, posts_limit=posts_limit)
             return "sync-inline"
         try:
-            from app.tasks.ingestion_tasks import index_project_sources_task
+            from app.tasks.ingestion_tasks import index_single_source_task
 
-            task = index_project_sources_task.delay(
-                str(project_id),
-                since.isoformat() if since else None,
-                until.isoformat() if until else None,
-                posts_limit,
-            )
-            return task.id
+            queued_ids: list[str] = []
+            for source in self.sources.list_by_project(project_id):
+                task = index_single_source_task.delay(
+                    str(source.id),
+                    since.isoformat() if since else None,
+                    until.isoformat() if until else None,
+                    posts_limit,
+                )
+                queued_ids.append(task.id)
+            return queued_ids[0] if queued_ids else "empty-project"
         except Exception:
             self.index_project_sources_sync(project_id, since=since, until=until, posts_limit=posts_limit)
             return "sync-fallback"
@@ -153,6 +156,8 @@ class IngestionService:
             total_comments = 0
             for index, (normalized_post, persisted_post) in enumerate(zip(posts, persisted_posts, strict=False), start=1):
                 try:
+                    if normalized_post.comments_count <= 0:
+                        continue
                     comments = self._fetch_comments_with_cache(
                         provider=provider,
                         source=source,
@@ -171,6 +176,7 @@ class IngestionService:
                 finally:
                     set_source_processed_posts(str(source.project_id), index)
 
+            self.db.commit()
             source.status = SourceStatusEnum.ready
             source.last_indexed_at = utcnow()
             self.sources.update(source)

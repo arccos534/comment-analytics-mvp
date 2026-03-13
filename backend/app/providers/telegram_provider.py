@@ -110,7 +110,7 @@ class TelegramProvider(BaseProvider):
 
             entity = await client.get_entity(source.external_source_id or source.source_url)
             posts: list[NormalizedPost] = []
-            async for message in client.iter_messages(entity, limit=None):
+            async for message in client.iter_messages(entity, limit=limit):
                 normalized = self._normalize_post(source, entity, message)
                 if not normalized:
                     continue
@@ -136,14 +136,14 @@ class TelegramProvider(BaseProvider):
                 ):
                     if not getattr(message, "message", None):
                         continue
-                    sender = await message.get_sender()
+                    sender = getattr(message, "sender", None)
                     comments.append(
                         NormalizedComment(
                             external_comment_id=str(message.id),
                             text=message.message,
                             created_at=message.date,
                             parent_external_comment_id=self._extract_parent_comment_id(message),
-                            author_external_id=str(getattr(sender, "id", "")) or None,
+                            author_external_id=str(getattr(sender, "id", getattr(message, "sender_id", ""))) or None,
                             author_name=self._resolve_sender_name(sender),
                             language="ru",
                             likes_count=0,
