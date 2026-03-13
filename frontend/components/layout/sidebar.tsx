@@ -2,12 +2,15 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
+import { usePathname } from "next/navigation";
 import { ChevronDown, ChevronRight, Database, FileText } from "lucide-react";
 
 import { useReportsTree } from "@/hooks/use-analysis";
 import { useProjects } from "@/hooks/use-projects";
+import { cn, formatReportGroupDate } from "@/lib/utils";
 
 export function Sidebar() {
+  const pathname = usePathname();
   const projectsQuery = useProjects();
   const reportsTreeQuery = useReportsTree();
   const [openProjects, setOpenProjects] = useState<Record<string, boolean>>({});
@@ -34,7 +37,12 @@ export function Sidebar() {
 
         <nav className="mt-10 space-y-3">
           <Link
-            className="group flex items-center gap-3 rounded-[22px] border border-white/10 bg-white/[0.035] px-4 py-3.5 text-sm font-medium text-foreground transition hover:border-cyan-300/20 hover:bg-white/[0.06]"
+            className={cn(
+              "group flex items-center gap-3 rounded-[22px] border px-4 py-3.5 text-sm font-medium transition",
+              pathname === "/projects"
+                ? "border-cyan-300/25 bg-cyan-400/[0.08] text-foreground shadow-[0_0_0_1px_rgba(92,217,255,0.06)]"
+                : "border-white/10 bg-white/[0.035] text-foreground hover:border-cyan-300/20 hover:bg-white/[0.06]"
+            )}
             href="/projects"
           >
             <span className="rounded-xl bg-cyan-400/10 p-2 text-cyan-200 transition group-hover:bg-cyan-400/15">
@@ -57,7 +65,13 @@ export function Sidebar() {
             <div className="mt-4 space-y-2">
               {(projectsQuery.data ?? []).map((project) => {
                 const reports = reportMap.get(project.id) ?? [];
-                const isOpen = openProjects[project.id] ?? false;
+                const hasActiveReport = pathname.startsWith(`/projects/${project.id}/reports/`);
+                const isOpen = openProjects[project.id] ?? hasActiveReport;
+                const groupedReports = reports.reduce<Record<string, typeof reports>>((acc, report) => {
+                  const key = formatReportGroupDate(report.created_at);
+                  acc[key] = [...(acc[key] ?? []), report];
+                  return acc;
+                }, {});
 
                 return (
                   <div key={project.id} className="rounded-2xl border border-white/8 bg-white/[0.025]">
@@ -67,7 +81,9 @@ export function Sidebar() {
                       className="flex w-full items-center justify-between gap-3 px-3 py-3 text-left transition hover:bg-white/[0.04]"
                     >
                       <div className="min-w-0">
-                        <div className="truncate text-sm font-medium text-foreground">{project.name}</div>
+                        <div className={cn("truncate text-sm font-medium", hasActiveReport ? "text-cyan-100" : "text-foreground")}>
+                          {project.name}
+                        </div>
                         <div className="text-xs text-muted-foreground">{reports.length} reports</div>
                       </div>
                       {isOpen ? (
@@ -80,15 +96,30 @@ export function Sidebar() {
                     {isOpen ? (
                       <div className="border-t border-white/8 px-2 py-2">
                         {reports.length ? (
-                          <div className="space-y-1">
-                            {reports.map((report) => (
-                              <Link
-                                key={report.analysis_run_id}
-                                href={`/projects/${project.id}/reports/${report.analysis_run_id}`}
-                                className="block rounded-xl px-3 py-2 text-sm text-muted-foreground transition hover:bg-white/[0.05] hover:text-foreground"
-                              >
-                                <div className="line-clamp-2">{report.title}</div>
-                              </Link>
+                          <div className="space-y-3">
+                            {Object.entries(groupedReports).map(([dateLabel, grouped]) => (
+                              <div key={dateLabel} className="space-y-1">
+                                <div className="px-3 text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground/80">
+                                  {dateLabel}
+                                </div>
+                                {grouped.map((report) => {
+                                  const isActive = pathname === `/projects/${project.id}/reports/${report.analysis_run_id}`;
+                                  return (
+                                    <Link
+                                      key={report.analysis_run_id}
+                                      href={`/projects/${project.id}/reports/${report.analysis_run_id}`}
+                                      className={cn(
+                                        "block rounded-xl px-3 py-2 text-sm transition",
+                                        isActive
+                                          ? "bg-cyan-400/[0.10] text-cyan-50 ring-1 ring-cyan-300/20"
+                                          : "text-muted-foreground hover:bg-white/[0.05] hover:text-foreground"
+                                      )}
+                                    >
+                                      <div className="line-clamp-2">{report.title}</div>
+                                    </Link>
+                                  );
+                                })}
+                              </div>
                             ))}
                           </div>
                         ) : (

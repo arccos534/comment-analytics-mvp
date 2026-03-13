@@ -14,7 +14,7 @@ export default function ProjectsPage() {
       <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
         <Header
           title="Projects"
-          subtitle="Создавайте базы источников, запускайте индексацию и собирайте отчеты по реакции аудитории в одном темном рабочем контуре."
+          subtitle="Создавайте базы источников, запускайте индексацию и собирайте отчеты по реакции аудитории в одном интерфейсе."
         />
         <CreateProjectDialog />
       </div>
