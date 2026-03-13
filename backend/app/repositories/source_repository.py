@@ -39,3 +39,11 @@ class SourceRepository:
         self.db.commit()
         self.db.refresh(source)
         return source
+
+    def delete(self, source_id: UUID) -> bool:
+        source = self.get(source_id)
+        if not source:
+            return False
+        self.db.delete(source)
+        self.db.commit()
+        return True

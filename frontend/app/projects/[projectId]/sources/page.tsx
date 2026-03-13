@@ -46,7 +46,7 @@ export default function ProjectSourcesPage({ params }: { params: { projectId: st
         onStart={(payload) => startIndexing.mutate(payload)}
       />
 
-      {isLoading ? <div>Loading sources...</div> : <SourceTable sources={sources} />}
+      {isLoading ? <div>Loading sources...</div> : <SourceTable projectId={params.projectId} sources={sources} />}
     </div>
   );
 }

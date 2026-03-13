@@ -24,6 +24,9 @@ class SourceService:
     def list_project_sources(self, project_id: UUID):
         return self.sources.list_by_project(project_id)
 
+    def delete_source(self, source_id: UUID) -> bool:
+        return self.sources.delete(source_id)
+
     def validate_urls(self, raw_urls: list[str]) -> list[SourceValidationResult]:
         results: list[SourceValidationResult] = []
         for url in split_urls(raw_urls):

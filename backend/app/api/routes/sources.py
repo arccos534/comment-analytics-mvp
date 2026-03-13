@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db
@@ -32,3 +32,11 @@ def add_sources(project_id: UUID, payload: SourceCreateRequest, db: Session = De
 @router.post("/sources/validate", response_model=list[SourceValidationResult])
 def validate_sources(payload: SourceValidateRequest, db: Session = Depends(get_db)) -> list[SourceValidationResult]:
     return SourceService(db).validate_urls(payload.urls)
+
+
+@router.delete("/sources/{source_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_source(source_id: UUID, db: Session = Depends(get_db)) -> Response:
+    deleted = SourceService(db).delete_source(source_id)
+    if not deleted:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Source not found")
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

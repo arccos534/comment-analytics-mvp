@@ -46,6 +46,32 @@ export function useAddSources(projectId: string) {
   });
 }
 
+export function useDeleteSource(projectId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (sourceId: string) => api.deleteSource(sourceId),
+    onMutate: async (sourceId) => {
+      await queryClient.cancelQueries({ queryKey: ["sources", projectId] });
+      const previousSources = queryClient.getQueryData<Source[]>(["sources", projectId]);
+      queryClient.setQueryData<Source[]>(
+        ["sources", projectId],
+        (current = []) => current.filter((source) => source.id !== sourceId)
+      );
+      return { previousSources };
+    },
+    onError: (_error, _sourceId, context) => {
+      if (context?.previousSources) {
+        queryClient.setQueryData(["sources", projectId], context.previousSources);
+      }
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ["sources", projectId] });
+      queryClient.invalidateQueries({ queryKey: ["projects", projectId] });
+      queryClient.invalidateQueries({ queryKey: ["index-status", projectId] });
+    }
+  });
+}
+
 export function useValidateSources() {
   return useMutation({
     mutationFn: (urls: string[]) => api.validateSources(urls)

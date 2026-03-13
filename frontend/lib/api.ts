@@ -32,6 +32,7 @@ export const api = {
   deleteProject: (projectId: string) => apiFetch<void>(`/projects/${projectId}`, { method: "DELETE" }),
   getProject: (projectId: string) => apiFetch<ProjectDetail>(`/projects/${projectId}`),
   listSources: (projectId: string) => apiFetch<Source[]>(`/projects/${projectId}/sources`),
+  deleteSource: (sourceId: string) => apiFetch<void>(`/sources/${sourceId}`, { method: "DELETE" }),
   validateSources: (urls: string[]) =>
     apiFetch<SourceValidationResult[]>("/sources/validate", { method: "POST", body: JSON.stringify({ urls }) }),
   addSources: (projectId: string, urls: string[]) =>
