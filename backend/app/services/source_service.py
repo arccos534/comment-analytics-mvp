@@ -9,6 +9,7 @@ from app.providers.factory import get_provider
 from app.repositories.project_repository import ProjectRepository
 from app.repositories.source_repository import SourceRepository
 from app.schemas.source import SourceBulkCreateResponse, SourceValidationResult
+from app.utils.index_progress import clear_current_source, clear_project_progress
 from app.utils.validators import detect_platform_and_type, split_urls
 
 
@@ -25,6 +26,18 @@ class SourceService:
         return self.sources.list_by_project(project_id)
 
     def delete_source(self, source_id: UUID) -> bool:
+        source = self.sources.get(source_id)
+        if not source:
+            return False
+        if source.status == SourceStatusEnum.indexing:
+            clear_current_source(str(source.project_id))
+            remaining_sources = [
+                item
+                for item in self.sources.list_by_project(source.project_id)
+                if item.id != source.id and item.status in {SourceStatusEnum.pending, SourceStatusEnum.indexing}
+            ]
+            if not remaining_sources:
+                clear_project_progress(str(source.project_id))
         return self.sources.delete(source_id)
 
     def validate_urls(self, raw_urls: list[str]) -> list[SourceValidationResult]:

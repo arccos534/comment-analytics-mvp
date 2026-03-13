@@ -73,8 +73,9 @@ class IngestionService:
         counts: dict[str, int] = {}
         for source in sources:
             counts[source.status.value] = counts.get(source.status.value, 0) + 1
-        progress = build_progress_summary(str(project_id))
-        if progress is None and sources:
+        has_active_indexing = (counts.get(SourceStatusEnum.pending.value, 0) + counts.get(SourceStatusEnum.indexing.value, 0)) > 0
+        progress = build_progress_summary(str(project_id)) if has_active_indexing else None
+        if progress is None and has_active_indexing and sources:
             ready_like = counts.get(SourceStatusEnum.ready.value, 0) + counts.get(SourceStatusEnum.failed.value, 0)
             progress = {
                 "percent": round((ready_like / len(sources)) * 100, 1),

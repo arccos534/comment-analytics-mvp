@@ -130,6 +130,13 @@ def clear_current_source(project_id: str) -> None:
     )
 
 
+def clear_project_progress(project_id: str) -> None:
+    client = _get_client()
+    if client is None:
+        return
+    client.delete(_progress_key(project_id))
+
+
 def build_progress_summary(project_id: str) -> dict | None:
     payload = get_project_progress(project_id)
     if payload is None:
