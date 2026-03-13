@@ -82,6 +82,11 @@ class ReportAggregator:
             for value in post_scores.values()
         ]
 
+        matched_posts = sorted(
+            post_items,
+            key=lambda item: (item["comments_count"], item["score"]),
+            reverse=True,
+        )
         popular_posts = sorted(post_items, key=lambda item: (item["score"], item["comments_count"]), reverse=True)[:5]
         unpopular_posts = sorted(post_items, key=lambda item: (item["score"], item["comments_count"]))[:5]
 
@@ -113,6 +118,7 @@ class ReportAggregator:
             },
             "examples": examples,
             "posts": {
+                "matched": matched_posts,
                 "top_popular": popular_posts,
                 "top_unpopular": unpopular_posts,
             },

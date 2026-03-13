@@ -12,12 +12,16 @@ import { TopicsCard } from "@/components/analytics/topics-card";
 import { Header } from "@/components/layout/header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { Select } from "@/components/ui/select";
 import { useAnalysisRun, useReport } from "@/hooks/use-analysis";
+
+const DISPLAY_OPTIONS = [3, 5, 10, 20];
 
 export default function ReportPage({ params }: { params: { projectId: string; reportId: string } }) {
   const runQuery = useAnalysisRun(params.reportId);
   const reportQuery = useReport(params.reportId, runQuery.data?.status === "completed");
-  const [showTopPosts, setShowTopPosts] = useState(true);
+  const [showPostPanels, setShowPostPanels] = useState(true);
+  const [postsLimit, setPostsLimit] = useState("5");
 
   if (runQuery.isLoading) {
     return <div>Loading analysis...</div>;
@@ -42,6 +46,7 @@ export default function ReportPage({ params }: { params: { projectId: string; re
   }
 
   const report = reportQuery.data.report_json;
+  const visibleLimit = Number.parseInt(postsLimit, 10) || 5;
 
   return (
     <div className="space-y-8">
@@ -63,30 +68,45 @@ export default function ReportPage({ params }: { params: { projectId: string; re
         <CommentsSampleList title="Neutral examples" comments={report.examples.neutral_comments} />
       </div>
 
-      <div className="flex items-center justify-between rounded-2xl border border-white/10 bg-card/50 px-4 py-3 backdrop-blur">
+      <div className="flex flex-col gap-4 rounded-2xl border border-white/10 bg-card/50 px-4 py-4 backdrop-blur md:flex-row md:items-center md:justify-between">
         <div>
-          <div className="text-sm font-medium text-foreground">Posts by engagement</div>
-          <div className="text-xs text-muted-foreground">Top popular and least popular posts for the selected report scope.</div>
+          <div className="text-sm font-medium text-foreground">Posts by scope and engagement</div>
+          <div className="text-xs text-muted-foreground">
+            Matched posts plus the most and least engaging posts inside the current report selection.
+          </div>
         </div>
-        <Button variant="secondary" onClick={() => setShowTopPosts((value) => !value)}>
-          {showTopPosts ? (
-            <>
-              <ChevronUp className="mr-2 h-4 w-4" />
-              Hide
-            </>
-          ) : (
-            <>
-              <ChevronDown className="mr-2 h-4 w-4" />
-              Show
-            </>
-          )}
-        </Button>
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <span>Show</span>
+            <Select className="h-10 w-24 bg-card/70" value={postsLimit} onChange={(event) => setPostsLimit(event.target.value)}>
+              {DISPLAY_OPTIONS.map((option) => (
+                <option key={option} value={String(option)}>
+                  {option}
+                </option>
+              ))}
+            </Select>
+          </div>
+          <Button variant="secondary" onClick={() => setShowPostPanels((value) => !value)}>
+            {showPostPanels ? (
+              <>
+                <ChevronUp className="mr-2 h-4 w-4" />
+                Hide posts
+              </>
+            ) : (
+              <>
+                <ChevronDown className="mr-2 h-4 w-4" />
+                Show posts
+              </>
+            )}
+          </Button>
+        </div>
       </div>
 
-      {showTopPosts ? (
-        <div className="grid gap-5 xl:grid-cols-2">
-          <TopPostsCard title="Top popular posts" posts={report.posts.top_popular} />
-          <TopPostsCard title="Top unpopular posts" posts={report.posts.top_unpopular} />
+      {showPostPanels ? (
+        <div className="grid gap-5 xl:grid-cols-3">
+          <TopPostsCard title="Matched posts" posts={(report.posts.matched || []).slice(0, visibleLimit)} />
+          <TopPostsCard title="Top popular posts" posts={(report.posts.top_popular || []).slice(0, visibleLimit)} />
+          <TopPostsCard title="Top unpopular posts" posts={(report.posts.top_unpopular || []).slice(0, visibleLimit)} />
         </div>
       ) : null}
     </div>

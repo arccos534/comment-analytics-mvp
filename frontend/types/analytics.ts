@@ -61,6 +61,7 @@ export interface ReportSnapshot {
       neutral_comments: ReportComment[];
     };
     posts: {
+      matched: ReportPost[];
       top_popular: ReportPost[];
       top_unpopular: ReportPost[];
     };
