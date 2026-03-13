@@ -83,7 +83,12 @@ class ReportAggregator:
         ]
 
         popular_posts = sorted(post_items, key=lambda item: (item["score"], item["comments_count"]), reverse=True)[:5]
-        unpopular_posts = sorted(post_items, key=lambda item: (item["score"], item["comments_count"]))[:5]
+        popular_post_ids = {item["post_id"] for item in popular_posts}
+        unpopular_posts = [
+            item
+            for item in sorted(post_items, key=lambda item: (item["score"], item["comments_count"]))
+            if item["post_id"] not in popular_post_ids
+        ][:5]
 
         report = {
             "meta": {

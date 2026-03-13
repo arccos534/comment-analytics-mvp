@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from uuid import UUID
 
 from sqlalchemy.orm import Session
@@ -70,6 +71,9 @@ class AnalyticsService:
     def get_report(self, analysis_run_id: UUID):
         return self.analysis_repo.get_report(analysis_run_id)
 
+    def _tokenize_scope(self, value: str) -> set[str]:
+        return set(re.findall(r"[A-Za-zА-Яа-яЁё0-9-]{4,}", value.lower()))
+
     def _matches_post_scope(self, post_text: str | None, theme: str | None, keywords: list[str] | None) -> bool:
         keywords = keywords or []
         has_post_scope = bool((theme or "").strip() or keywords)
@@ -85,8 +89,16 @@ class AnalyticsService:
         if normalized_keywords and any(keyword in lowered for keyword in normalized_keywords):
             return True
 
+        scope_tokens = self._tokenize_scope(" ".join([theme or "", " ".join(normalized_keywords)]))
+        post_tokens = self._tokenize_scope(text)
+        token_overlap = len(scope_tokens & post_tokens)
+        if token_overlap >= 2:
+            return True
+
         topic_score = self.relevance.score_post_topic(text=text, theme=theme, keywords=keywords)
-        return topic_score >= 0.08
+        if normalized_keywords:
+            return topic_score >= 0.22
+        return topic_score >= 0.18
 
     def execute_run_sync(self, analysis_run_id: UUID) -> dict:
         run = self.analysis_repo.update_run_status(analysis_run_id, AnalysisRunStatusEnum.running)
