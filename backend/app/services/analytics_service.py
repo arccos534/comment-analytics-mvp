@@ -74,6 +74,41 @@ class AnalyticsService:
     def _tokenize_scope(self, value: str) -> set[str]:
         return set(re.findall(r"[A-Za-zА-Яа-яЁё0-9-]{4,}", value.lower()))
 
+    def _is_advertising_post(self, post_text: str | None) -> bool:
+        text = (post_text or "").strip().lower()
+        if not text:
+            return False
+
+        ad_markers = {
+            "реклама",
+            "erid",
+            "рекламодатель",
+            "партнерский материал",
+            "при поддержке",
+            "спонсор",
+            "скидка",
+            "промокод",
+            "акция",
+            "купить",
+            "заказать",
+            "оформить заказ",
+            "записывайтесь",
+            "самовывоз",
+            "доставка по",
+            "подробности по ссылке",
+        }
+        if any(marker in text for marker in ad_markers):
+            return True
+
+        links_count = len(re.findall(r"https?://|www\\.", text))
+        phone_count = len(re.findall(r"(?:\\+7|8)[\\s\\-(]*\\d", text))
+        cta_markers = sum(
+            1
+            for marker in {"по ссылке", "звоните", "подробнее", "стоимость", "цены", "в наличии", "вопросы по телефону"}
+            if marker in text
+        )
+        return links_count >= 2 or phone_count >= 1 or (links_count >= 1 and cta_markers >= 1)
+
     def _matches_post_scope(self, post_text: str | None, theme: str | None, keywords: list[str] | None) -> bool:
         keywords = keywords or []
         has_post_scope = bool((theme or "").strip() or keywords)
@@ -118,6 +153,7 @@ class AnalyticsService:
                 record
                 for record in records
                 if self._matches_post_scope(record[1].post_text, run.theme, run.keywords_json or [])
+                and not self._is_advertising_post(record[1].post_text)
             ]
 
             enriched_comments: list[dict] = []
