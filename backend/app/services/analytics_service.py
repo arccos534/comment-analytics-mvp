@@ -313,7 +313,8 @@ class AnalyticsService:
                     "source_ids": [str(source_id) for source_id in source_filters],
                 },
             )
-            summary_text = self.report_service.build_summary_text(report_json, prompt_text=run.prompt_text)
+            summary_data, summary_text = self.report_service.build_summary(report_json, prompt_text=run.prompt_text)
+            report_json["summary"] = summary_data
             self.analysis_repo.replace_report_snapshot(run.id, report_json, summary_text)
             self.analysis_repo.update_run_status(run.id, AnalysisRunStatusEnum.completed, finished_at=utcnow())
             return {"status": "completed", "analysis_run_id": str(run.id)}

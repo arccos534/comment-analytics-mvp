@@ -78,9 +78,11 @@ export interface ReportSnapshot {
       top_unpopular: ReportPost[];
     };
     summary: {
-      highlights: string[];
-      risks: string[];
-      recommendations: string[];
+      focus?: string;
+      verdict?: string;
+      key_points?: string[];
+      limitations?: string[];
+      overview?: string;
     };
   };
   summary_text: string | null;
