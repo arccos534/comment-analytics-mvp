@@ -74,6 +74,31 @@ class AnalyticsService:
     def get_report(self, analysis_run_id: UUID):
         return self.analysis_repo.get_report(analysis_run_id)
 
+    def list_reports_tree(self) -> list[dict]:
+        grouped: dict[UUID, dict] = {}
+        for project, run, _snapshot in self.analysis_repo.list_reports_tree():
+            bucket = grouped.setdefault(
+                project.id,
+                {
+                    "project_id": project.id,
+                    "project_name": project.name,
+                    "reports": [],
+                },
+            )
+            bucket["reports"].append(
+                {
+                    "analysis_run_id": run.id,
+                    "title": self._build_report_title(run.theme, run.prompt_text),
+                    "created_at": run.created_at,
+                }
+            )
+        return list(grouped.values())
+
+    def _build_report_title(self, theme: str | None, prompt_text: str) -> str:
+        base = (theme or "").strip() or prompt_text.strip()
+        normalized = re.sub(r"\s+", " ", base)
+        return normalized[:64].rstrip() + ("..." if len(normalized) > 64 else "")
+
     def _tokenize_scope(self, value: str) -> set[str]:
         return set(re.findall(r"[A-Za-zА-Яа-яЁё0-9-]{4,}", value.lower()))
 

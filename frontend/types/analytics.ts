@@ -25,6 +25,18 @@ export interface AnalysisRun {
   finished_at: string | null;
 }
 
+export interface SavedReportItem {
+  analysis_run_id: string;
+  title: string;
+  created_at: string;
+}
+
+export interface ProjectReportsTreeItem {
+  project_id: string;
+  project_name: string;
+  reports: SavedReportItem[];
+}
+
 export interface ReportSnapshot {
   id: string;
   analysis_run_id: string;

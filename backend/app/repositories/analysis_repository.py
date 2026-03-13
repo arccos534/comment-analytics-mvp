@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.models.analysis_run import AnalysisRun
 from app.models.comment_analysis import CommentAnalysis
 from app.models.enums import AnalysisRunStatusEnum, SentimentEnum
+from app.models.project import Project
 from app.models.report_snapshot import ReportSnapshot
 
 
@@ -86,3 +87,13 @@ class AnalysisRepository:
         return self.db.scalar(
             select(ReportSnapshot).where(ReportSnapshot.analysis_run_id == analysis_run_id).order_by(ReportSnapshot.created_at.desc())
         )
+
+    def list_reports_tree(self) -> list[tuple[Project, AnalysisRun, ReportSnapshot]]:
+        rows = self.db.execute(
+            select(Project, AnalysisRun, ReportSnapshot)
+            .join(AnalysisRun, AnalysisRun.project_id == Project.id)
+            .join(ReportSnapshot, ReportSnapshot.analysis_run_id == AnalysisRun.id)
+            .where(AnalysisRun.status == AnalysisRunStatusEnum.completed)
+            .order_by(Project.created_at.desc(), AnalysisRun.created_at.desc())
+        )
+        return list(rows.all())

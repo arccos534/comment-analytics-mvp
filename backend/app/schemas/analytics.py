@@ -70,3 +70,15 @@ class ReportSnapshotResponse(ORMModel):
     report_json: ReportSchema
     summary_text: str | None
     created_at: datetime
+
+
+class SavedReportItem(BaseModel):
+    analysis_run_id: UUID
+    title: str
+    created_at: datetime
+
+
+class ProjectReportsTreeItem(BaseModel):
+    project_id: UUID
+    project_name: str
+    reports: list[SavedReportItem]

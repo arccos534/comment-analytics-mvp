@@ -35,3 +35,12 @@ export function useReport(analysisRunId?: string, enabled = true) {
     retry: false
   });
 }
+
+export function useReportsTree() {
+  return useQuery({
+    queryKey: ["reports-tree"],
+    queryFn: api.listReportsTree,
+    staleTime: 15_000,
+    refetchInterval: 30_000
+  });
+}

@@ -1,4 +1,4 @@
-import { AnalysisCreatePayload, AnalysisRun, ReportSnapshot } from "@/types/analytics";
+import { AnalysisCreatePayload, AnalysisRun, ProjectReportsTreeItem, ReportSnapshot } from "@/types/analytics";
 import { Project, ProjectDetail } from "@/types/project";
 import { IndexStatusResponse, Source, SourceBulkCreateResponse, SourceValidationResult, StartIndexingPayload } from "@/types/source";
 
@@ -51,6 +51,7 @@ export const api = {
       method: "POST",
       body: JSON.stringify(payload)
     }),
+  listReportsTree: () => apiFetch<ProjectReportsTreeItem[]>("/reports-tree"),
   getAnalysisRun: (analysisRunId: string) => apiFetch<AnalysisRun>(`/analysis-runs/${analysisRunId}`),
   getReport: (analysisRunId: string) => apiFetch<ReportSnapshot>(`/analysis-runs/${analysisRunId}/report`)
 };

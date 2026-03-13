@@ -28,6 +28,7 @@ export function useCreateProject() {
     mutationFn: api.createProject,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["projects"] });
+      queryClient.invalidateQueries({ queryKey: ["reports-tree"] });
     }
   });
 }
@@ -54,9 +55,11 @@ export function useDeleteProject() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["projects"] });
+      queryClient.invalidateQueries({ queryKey: ["reports-tree"] });
     },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ["projects"] });
+      queryClient.invalidateQueries({ queryKey: ["reports-tree"] });
     },
   });
 }

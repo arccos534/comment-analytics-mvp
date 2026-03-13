@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db
-from app.schemas.analytics import AnalysisCreateRequest, AnalysisRunResponse, ReportSnapshotResponse
+from app.schemas.analytics import AnalysisCreateRequest, AnalysisRunResponse, ProjectReportsTreeItem, ReportSnapshotResponse
 from app.services.analytics_service import AnalyticsService
 
 router = APIRouter(tags=["analytics"])
@@ -36,3 +36,8 @@ def get_report(analysis_run_id: UUID, db: Session = Depends(get_db)) -> ReportSn
     if not report:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Report not found")
     return report
+
+
+@router.get("/reports-tree", response_model=list[ProjectReportsTreeItem])
+def list_reports_tree(db: Session = Depends(get_db)) -> list[ProjectReportsTreeItem]:
+    return AnalyticsService(db).list_reports_tree()
