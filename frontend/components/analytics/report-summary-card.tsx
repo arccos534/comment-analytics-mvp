@@ -9,10 +9,11 @@ export function ReportSummaryCard({
   summaryText: string | null;
   summary?: {
     focus?: string;
-    verdict?: string;
-    key_points?: string[];
+    answer_to_prompt?: string;
+    what_audience_likes?: string[];
+    what_audience_dislikes?: string[];
+    interest_drivers?: string[];
     limitations?: string[];
-    overview?: string;
   };
   meta: {
     post_theme?: string | null;
@@ -30,7 +31,7 @@ export function ReportSummaryCard({
       <CardHeader>
         <CardTitle>Сводка</CardTitle>
       </CardHeader>
-      <CardContent className="space-y-4 text-sm">
+      <CardContent className="space-y-5 text-sm">
         <div className="grid gap-3 md:grid-cols-2">
           <InfoItem label="Тема постов" value={meta.post_theme || "Не указана"} />
           <InfoItem label="Платформы" value={(meta.platforms || []).join(", ") || "Все"} />
@@ -43,11 +44,22 @@ export function ReportSummaryCard({
             value={`${stats.total_posts} постов / ${stats.analyzed_comments} релевантных комментариев`}
           />
         </div>
+
         {summary?.focus ? <SummarySection title="Контекст анализа" content={summary.focus} /> : null}
-        {summary?.verdict ? <SummarySection title="Ключевой вывод" content={summary.verdict} /> : null}
-        {summary?.key_points?.length ? <ListSection title="Что важно" items={summary.key_points} /> : null}
-        {summary?.limitations?.length ? <ListSection title="Ограничения выборки" items={summary.limitations} /> : null}
-        {summaryText ? <SummarySection title="Итог" content={summaryText} /> : null}
+        {summary?.answer_to_prompt ? <SummarySection title="Ответ на запрос" content={summary.answer_to_prompt} /> : null}
+        {summary?.what_audience_likes?.length ? (
+          <ListSection title="Что нравится аудитории" items={summary.what_audience_likes} />
+        ) : null}
+        {summary?.what_audience_dislikes?.length ? (
+          <ListSection title="Что не нравится аудитории" items={summary.what_audience_dislikes} />
+        ) : null}
+        {summary?.interest_drivers?.length ? (
+          <ListSection title="Что вызывает интерес" items={summary.interest_drivers} />
+        ) : null}
+        {summary?.limitations?.length ? (
+          <ListSection title="Ограничения выборки" items={summary.limitations} />
+        ) : null}
+        {summaryText ? <SummarySection title="Краткое резюме" content={summaryText} /> : null}
       </CardContent>
     </Card>
   );
