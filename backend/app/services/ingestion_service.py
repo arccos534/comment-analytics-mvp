@@ -13,6 +13,14 @@ from app.repositories.project_repository import ProjectRepository
 from app.repositories.source_repository import SourceRepository
 from app.schemas.source import IndexModeEnum, IndexPeriodPresetEnum, IndexRequest
 from app.utils.dates import utcnow
+from app.utils.provider_cache import (
+    comments_cache_key,
+    load_comments,
+    load_posts,
+    posts_cache_key,
+    save_comments,
+    save_posts,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -102,13 +110,23 @@ class IngestionService:
             # A manual project reindex should rebuild the full source history unless
             # the caller explicitly requests an incremental sync via `since`.
             effective_since = since
-            posts = provider.fetch_posts(source, since=effective_since, until=until, limit=posts_limit)
+            posts = self._fetch_posts_with_cache(
+                provider=provider,
+                source=source,
+                since=effective_since,
+                until=until,
+                posts_limit=posts_limit,
+            )
             persisted_posts = self.posts.upsert_posts(source.id, posts)
 
             total_comments = 0
             for normalized_post, persisted_post in zip(posts, persisted_posts, strict=False):
                 try:
-                    comments = provider.fetch_comments(source, normalized_post)
+                    comments = self._fetch_comments_with_cache(
+                        provider=provider,
+                        source=source,
+                        post=normalized_post,
+                    )
                     self.comments.upsert_comments(persisted_post.id, comments)
                     total_comments += len(comments)
                 except Exception as exc:
@@ -154,3 +172,25 @@ class IngestionService:
         if request.mode == IndexModeEnum.custom_period:
             return request.period_from, request.period_to, None
         return None, None, None
+
+    def _fetch_posts_with_cache(self, provider, source, since: datetime | None, until: datetime | None, posts_limit: int | None):
+        cache_key = posts_cache_key(str(source.id), since, until, posts_limit)
+        cached = load_posts(cache_key)
+        if cached is not None:
+            logger.info("Posts cache hit for source=%s", source.id)
+            return cached
+
+        posts = provider.fetch_posts(source, since=since, until=until, limit=posts_limit)
+        save_posts(cache_key, posts)
+        return posts
+
+    def _fetch_comments_with_cache(self, provider, source, post):
+        cache_key = comments_cache_key(str(source.id), post.external_post_id)
+        cached = load_comments(cache_key)
+        if cached is not None:
+            logger.info("Comments cache hit for source=%s post=%s", source.id, post.external_post_id)
+            return cached
+
+        comments = provider.fetch_comments(source, post)
+        save_comments(cache_key, comments)
+        return comments

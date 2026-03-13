@@ -1,17 +1,23 @@
 "use client";
 
+import { useState } from "react";
+
+import { ChevronDown, ChevronUp } from "lucide-react";
+
 import { CommentsSampleList } from "@/components/analytics/comments-sample-list";
 import { ReportSummaryCard } from "@/components/analytics/report-summary-card";
 import { SentimentCard } from "@/components/analytics/sentiment-card";
 import { TopPostsCard } from "@/components/analytics/top-posts-card";
 import { TopicsCard } from "@/components/analytics/topics-card";
 import { Header } from "@/components/layout/header";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { useAnalysisRun, useReport } from "@/hooks/use-analysis";
 
 export default function ReportPage({ params }: { params: { projectId: string; reportId: string } }) {
   const runQuery = useAnalysisRun(params.reportId);
   const reportQuery = useReport(params.reportId, runQuery.data?.status === "completed");
+  const [showTopPosts, setShowTopPosts] = useState(true);
 
   if (runQuery.isLoading) {
     return <div>Loading analysis...</div>;
@@ -57,10 +63,32 @@ export default function ReportPage({ params }: { params: { projectId: string; re
         <CommentsSampleList title="Neutral examples" comments={report.examples.neutral_comments} />
       </div>
 
-      <div className="grid gap-5 xl:grid-cols-2">
-        <TopPostsCard title="Top popular posts" posts={report.posts.top_popular} />
-        <TopPostsCard title="Top unpopular posts" posts={report.posts.top_unpopular} />
+      <div className="flex items-center justify-between rounded-2xl border border-white/10 bg-card/50 px-4 py-3 backdrop-blur">
+        <div>
+          <div className="text-sm font-medium text-foreground">Posts by engagement</div>
+          <div className="text-xs text-muted-foreground">Top popular and least popular posts for the selected report scope.</div>
+        </div>
+        <Button variant="secondary" onClick={() => setShowTopPosts((value) => !value)}>
+          {showTopPosts ? (
+            <>
+              <ChevronUp className="mr-2 h-4 w-4" />
+              Hide
+            </>
+          ) : (
+            <>
+              <ChevronDown className="mr-2 h-4 w-4" />
+              Show
+            </>
+          )}
+        </Button>
       </div>
+
+      {showTopPosts ? (
+        <div className="grid gap-5 xl:grid-cols-2">
+          <TopPostsCard title="Top popular posts" posts={report.posts.top_popular} />
+          <TopPostsCard title="Top unpopular posts" posts={report.posts.top_unpopular} />
+        </div>
+      ) : null}
     </div>
   );
 }

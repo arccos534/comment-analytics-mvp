@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     default_lookback_days: int = 90
     sentence_transformer_model: str = "sentence-transformers/all-MiniLM-L6-v2"
     provider_http_timeout_seconds: int = 30
+    ingestion_cache_ttl_seconds: int = 3600
 
     telegram_api_id: int | None = None
     telegram_api_hash: str | None = None
