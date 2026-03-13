@@ -70,6 +70,24 @@ class AnalyticsService:
     def get_report(self, analysis_run_id: UUID):
         return self.analysis_repo.get_report(analysis_run_id)
 
+    def _matches_post_scope(self, post_text: str | None, theme: str | None, keywords: list[str] | None) -> bool:
+        keywords = keywords or []
+        has_post_scope = bool((theme or "").strip() or keywords)
+        if not has_post_scope:
+            return True
+
+        text = (post_text or "").strip()
+        if not text:
+            return False
+
+        lowered = text.lower()
+        normalized_keywords = [keyword.strip().lower() for keyword in keywords if keyword.strip()]
+        if normalized_keywords and any(keyword in lowered for keyword in normalized_keywords):
+            return True
+
+        topic_score = self.relevance.score_post_topic(text=text, theme=theme, keywords=keywords)
+        return topic_score >= 0.08
+
     def execute_run_sync(self, analysis_run_id: UUID) -> dict:
         run = self.analysis_repo.update_run_status(analysis_run_id, AnalysisRunStatusEnum.running)
         if not run:
@@ -84,16 +102,19 @@ class AnalyticsService:
                 source_ids=source_filters,
                 platforms=platform_filters,
             )
+            scoped_records = [
+                record
+                for record in records
+                if self._matches_post_scope(record[1].post_text, run.theme, run.keywords_json or [])
+            ]
 
             enriched_comments: list[dict] = []
-            for comment, post, source in records:
+            for comment, post, source in scoped_records:
                 extracted_keywords = self.keywords.extract(comment.text)
                 topics = self.topics.group(extracted_keywords, comment.text)
-                relevance_score = self.relevance.score(
+                relevance_score = self.relevance.score_comment_prompt(
                     text=comment.text,
                     prompt_text=run.prompt_text,
-                    theme=run.theme,
-                    keywords=run.keywords_json or [],
                 )
                 sentiment_result = self.sentiment.analyze(comment.text)
                 self.analysis_repo.upsert_comment_analysis(
@@ -125,7 +146,7 @@ class AnalyticsService:
                     "source_ids": [str(source_id) for source_id in source_filters],
                 },
             )
-            summary_text = self.report_service.build_summary_text(report_json)
+            summary_text = self.report_service.build_summary_text(report_json, prompt_text=run.prompt_text)
             self.analysis_repo.replace_report_snapshot(run.id, report_json, summary_text)
             self.analysis_repo.update_run_status(run.id, AnalysisRunStatusEnum.completed, finished_at=utcnow())
             return {"status": "completed", "analysis_run_id": str(run.id)}

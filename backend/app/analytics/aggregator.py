@@ -94,6 +94,9 @@ class ReportAggregator:
         report = {
             "meta": {
                 "project_id": str(run.project_id),
+                "prompt_text": run.prompt_text,
+                "post_theme": run.theme,
+                "post_keywords": run.keywords_json or [],
                 "period_from": run.period_from.isoformat() if run.period_from else None,
                 "period_to": run.period_to.isoformat() if run.period_to else None,
                 "platforms": filters.get("platforms", []),

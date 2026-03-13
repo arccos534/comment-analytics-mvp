@@ -28,8 +28,7 @@ def _load_model():
 
 
 class RelevanceScorer:
-    def score(self, text: str, prompt_text: str, theme: str | None, keywords: list[str]) -> float:
-        baseline = " ".join(part for part in [prompt_text, theme or "", " ".join(keywords)] if part).strip()
+    def score(self, text: str, baseline: str) -> float:
         if not baseline:
             return 1.0
 
@@ -48,3 +47,13 @@ class RelevanceScorer:
         overlap = len(text_tokens & baseline_tokens)
         union = len(text_tokens | baseline_tokens) or 1
         return round(overlap / union, 4)
+
+    def score_comment_prompt(self, text: str, prompt_text: str) -> float:
+        baseline = (prompt_text or "").strip()
+        return self.score(text, baseline)
+
+    def score_post_topic(self, text: str, theme: str | None, keywords: list[str]) -> float:
+        baseline = " ".join(part for part in [theme or "", " ".join(keywords)] if part).strip()
+        if not baseline:
+            return 1.0
+        return self.score(text, baseline)

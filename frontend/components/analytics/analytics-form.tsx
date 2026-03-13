@@ -17,7 +17,7 @@ export function AnalyticsForm({ projectId, sources }: { projectId: string; sourc
   const runAnalysis = useRunAnalysis(projectId);
   const setLatestAnalysisRunId = useUiStore((state) => state.setLatestAnalysisRunId);
 
-  const [promptText, setPromptText] = useState("Проанализируй реакцию аудитории на продукт, цену и качество сервиса.");
+  const [promptText, setPromptText] = useState("Проанализируй реакцию аудитории в комментариях: что нравится, что не нравится и какие сигналы повторяются.");
   const [theme, setTheme] = useState("Продукт и пользовательский опыт");
   const [keywords, setKeywords] = useState("цена, качество, поддержка, доставка");
   const [periodFrom, setPeriodFrom] = useState("");
@@ -52,24 +52,39 @@ export function AnalyticsForm({ projectId, sources }: { projectId: string; sourc
   }
 
   return (
-    <Card className="bg-white/80">
+    <Card className="bg-white/5">
       <CardHeader>
         <CardTitle>Generate report</CardTitle>
-        <CardDescription>Настройте тему, фильтры и период анализа.</CardDescription>
+        <CardDescription>Тема и keywords относятся к постам и новостям. Prompt задает фокус анализа комментариев.</CardDescription>
       </CardHeader>
       <CardContent className="grid gap-6 lg:grid-cols-2">
         <div className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="prompt">Prompt</Label>
-            <Input id="prompt" value={promptText} onChange={(event) => setPromptText(event.target.value)} />
+            <Label htmlFor="theme">Theme of posts/news</Label>
+            <Input
+              id="theme"
+              value={theme}
+              onChange={(event) => setTheme(event.target.value)}
+              placeholder="Например: обновление продукта, цены, доставка"
+            />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="theme">Theme</Label>
-            <Input id="theme" value={theme} onChange={(event) => setTheme(event.target.value)} />
+            <Label htmlFor="keywords">Keywords in posts/news</Label>
+            <Input
+              id="keywords"
+              value={keywords}
+              onChange={(event) => setKeywords(event.target.value)}
+              placeholder="Например: цена, тариф, доставка, поддержка"
+            />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="keywords">Keywords</Label>
-            <Input id="keywords" value={keywords} onChange={(event) => setKeywords(event.target.value)} />
+            <Label htmlFor="prompt">Prompt for comment analysis</Label>
+            <Input
+              id="prompt"
+              value={promptText}
+              onChange={(event) => setPromptText(event.target.value)}
+              placeholder="Например: найди основные претензии аудитории и частые позитивные сигналы"
+            />
           </div>
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2">
@@ -99,7 +114,7 @@ export function AnalyticsForm({ projectId, sources }: { projectId: string; sourc
             <div className="max-h-60 space-y-2 overflow-auto rounded-2xl bg-muted p-3">
               {readySources.length ? (
                 readySources.map((source) => (
-                  <label key={source.id} className="flex items-start gap-3 rounded-xl bg-white px-3 py-2 text-sm">
+                  <label key={source.id} className="flex items-start gap-3 rounded-xl bg-white/5 px-3 py-2 text-sm">
                     <Checkbox checked={selectedSourceIds.includes(source.id)} onCheckedChange={() => toggleSource(source.id)} />
                     <span>{source.title || source.source_url}</span>
                   </label>
