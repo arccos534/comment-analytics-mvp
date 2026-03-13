@@ -101,7 +101,7 @@ class TelegramProvider(BaseProvider):
 
             entity = await client.get_entity(source.external_source_id or source.source_url)
             posts: list[NormalizedPost] = []
-            async for message in client.iter_messages(entity, limit=self.settings.ingestion_batch_size):
+            async for message in client.iter_messages(entity, limit=None):
                 normalized = self._normalize_post(source, entity, message)
                 if not normalized:
                     continue
@@ -118,7 +118,7 @@ class TelegramProvider(BaseProvider):
                 entity = await client.get_entity(entity_ref)
                 async for message in client.iter_messages(
                     entity,
-                    limit=self.settings.ingestion_batch_size,
+                    limit=None,
                     reply_to=int(post.external_post_id),
                 ):
                     if not getattr(message, "message", None):

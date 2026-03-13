@@ -77,15 +77,7 @@ class VkProvider(BaseProvider):
             items = self._api_call("wall.getById", {"posts": f"wall{owner_id}_{post_id}"})
         else:
             owner_id = int(source.external_source_id)
-            response = self._api_call(
-                "wall.get",
-                {
-                    "owner_id": owner_id,
-                    "count": self.settings.ingestion_batch_size,
-                    "filter": "owner",
-                },
-            )
-            items = response.get("items", [])
+            items = self._fetch_all_wall_posts(owner_id, since_dt)
 
         posts: list[NormalizedPost] = []
         for item in items:
@@ -98,22 +90,10 @@ class VkProvider(BaseProvider):
     def _fetch_comments_live(self, source, post: NormalizedPost) -> list[NormalizedComment]:
         self._ensure_token()
         owner_id, post_id = self._owner_and_post_id(source, post)
-        response = self._api_call(
-            "wall.getComments",
-            {
-                "owner_id": owner_id,
-                "post_id": post_id,
-                "count": self.settings.ingestion_batch_size,
-                "sort": "desc",
-                "extended": 1,
-                "thread_items_count": 10,
-            },
-        )
-        profiles = {profile["id"]: profile for profile in response.get("profiles", [])}
-        groups = {group["id"]: group for group in response.get("groups", [])}
+        items, profiles, groups = self._fetch_all_post_comments(owner_id, post_id)
 
         comments: list[NormalizedComment] = []
-        for item in response.get("items", []):
+        for item in items:
             text = (item.get("text") or "").strip()
             if not text:
                 continue
@@ -269,3 +249,124 @@ class VkProvider(BaseProvider):
         if text:
             return text[:120]
         return f"VK post wall{post['owner_id']}_{post['id']}"
+
+    def _fetch_all_wall_posts(self, owner_id: int, since_dt: datetime | None) -> list[dict[str, Any]]:
+        page_size = max(1, min(self.settings.ingestion_batch_size, 100))
+        offset = 0
+        items: list[dict[str, Any]] = []
+        should_stop = False
+
+        while not should_stop:
+            response = self._api_call(
+                "wall.get",
+                {
+                    "owner_id": owner_id,
+                    "count": page_size,
+                    "offset": offset,
+                    "filter": "owner",
+                },
+            )
+            batch = response.get("items", [])
+            if not batch:
+                break
+
+            for item in batch:
+                if since_dt:
+                    post_date = datetime.fromtimestamp(item["date"], tz=UTC)
+                    if post_date <= since_dt:
+                        should_stop = True
+                        break
+                items.append(item)
+
+            offset += len(batch)
+            if len(batch) < page_size:
+                break
+
+        return items
+
+    def _fetch_all_post_comments(
+        self,
+        owner_id: int,
+        post_id: int,
+    ) -> tuple[list[dict[str, Any]], dict[int, dict[str, Any]], dict[int, dict[str, Any]]]:
+        page_size = max(1, min(self.settings.ingestion_batch_size, 100))
+        offset = 0
+        items: list[dict[str, Any]] = []
+        profiles: dict[int, dict[str, Any]] = {}
+        groups: dict[int, dict[str, Any]] = {}
+
+        while True:
+            response = self._api_call(
+                "wall.getComments",
+                {
+                    "owner_id": owner_id,
+                    "post_id": post_id,
+                    "count": page_size,
+                    "offset": offset,
+                    "sort": "asc",
+                    "extended": 1,
+                    "thread_items_count": 10,
+                },
+            )
+            batch = response.get("items", [])
+            if not batch:
+                break
+
+            for profile in response.get("profiles", []):
+                profiles[profile["id"]] = profile
+            for group in response.get("groups", []):
+                groups[group["id"]] = group
+
+            for item in batch:
+                items.append(item)
+                nested_items, nested_profiles, nested_groups = self._fetch_comment_thread(owner_id, post_id, item["id"])
+                items.extend(nested_items)
+                profiles.update(nested_profiles)
+                groups.update(nested_groups)
+
+            offset += len(batch)
+            if len(batch) < page_size:
+                break
+
+        return items, profiles, groups
+
+    def _fetch_comment_thread(
+        self,
+        owner_id: int,
+        post_id: int,
+        comment_id: int,
+    ) -> tuple[list[dict[str, Any]], dict[int, dict[str, Any]], dict[int, dict[str, Any]]]:
+        page_size = max(1, min(self.settings.ingestion_batch_size, 100))
+        offset = 0
+        items: list[dict[str, Any]] = []
+        profiles: dict[int, dict[str, Any]] = {}
+        groups: dict[int, dict[str, Any]] = {}
+
+        while True:
+            response = self._api_call(
+                "wall.getComments",
+                {
+                    "owner_id": owner_id,
+                    "post_id": post_id,
+                    "comment_id": comment_id,
+                    "count": page_size,
+                    "offset": offset,
+                    "sort": "asc",
+                    "extended": 1,
+                },
+            )
+            batch = response.get("items", [])
+            if not batch:
+                break
+
+            for profile in response.get("profiles", []):
+                profiles[profile["id"]] = profile
+            for group in response.get("groups", []):
+                groups[group["id"]] = group
+            items.extend(batch)
+
+            offset += len(batch)
+            if len(batch) < page_size:
+                break
+
+        return items, profiles, groups

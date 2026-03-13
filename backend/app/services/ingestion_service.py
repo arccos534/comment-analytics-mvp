@@ -77,7 +77,9 @@ class IngestionService:
         self.sources.update(source)
         try:
             provider = get_provider(source.platform)
-            effective_since = since or self.posts.latest_post_date_for_source(source.id)
+            # A manual project reindex should rebuild the full source history unless
+            # the caller explicitly requests an incremental sync via `since`.
+            effective_since = since
             posts = provider.fetch_posts(source, since=effective_since)
             persisted_posts = self.posts.upsert_posts(source.id, posts)
 
