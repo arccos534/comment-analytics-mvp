@@ -50,9 +50,8 @@ export default function ReportPage({ params }: { params: { projectId: string; re
         <TopicsCard topics={report.topics} />
         <ReportSummaryCard
           summaryText={reportQuery.data.summary_text}
-          highlights={report.summary.highlights}
-          risks={report.summary.risks}
-          recommendations={report.summary.recommendations}
+          meta={report.meta}
+          stats={report.stats}
         />
       </div>
 

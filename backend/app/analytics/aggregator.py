@@ -122,9 +122,9 @@ class ReportAggregator:
                 "top_unpopular": unpopular_posts,
             },
             "summary": {
-                "highlights": [f"Преобладающая тема обсуждения: {topics[0]['name']}" if topics else "Данных по выбранной теме недостаточно"],
-                "risks": disliked_patterns[:3],
-                "recommendations": self._build_recommendations(liked_patterns, disliked_patterns),
+                "highlights": [],
+                "risks": [],
+                "recommendations": [],
             },
         }
         return report
@@ -151,13 +151,3 @@ class ReportAggregator:
             if len(examples) == 3:
                 break
         return examples
-
-    def _build_recommendations(self, liked_patterns: list[str], disliked_patterns: list[str]) -> list[str]:
-        recommendations: list[str] = []
-        if liked_patterns:
-            recommendations.append(f"Усилить коммуникацию вокруг темы '{liked_patterns[0]}'.")
-        if disliked_patterns:
-            recommendations.append(f"Подготовить ответ на повторяющиеся претензии по теме '{disliked_patterns[0]}'.")
-        if not recommendations:
-            recommendations.append("Собрать больше релевантных комментариев по выбранной теме постов.")
-        return recommendations
