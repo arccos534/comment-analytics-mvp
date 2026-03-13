@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime, timedelta
 from uuid import UUID
 
@@ -12,6 +13,8 @@ from app.repositories.project_repository import ProjectRepository
 from app.repositories.source_repository import SourceRepository
 from app.schemas.source import IndexModeEnum, IndexPeriodPresetEnum, IndexRequest
 from app.utils.dates import utcnow
+
+logger = logging.getLogger(__name__)
 
 
 class IngestionService:
@@ -104,15 +107,32 @@ class IngestionService:
 
             total_comments = 0
             for normalized_post, persisted_post in zip(posts, persisted_posts, strict=False):
-                comments = provider.fetch_comments(source, normalized_post)
-                self.comments.upsert_comments(persisted_post.id, comments)
-                total_comments += len(comments)
+                try:
+                    comments = provider.fetch_comments(source, normalized_post)
+                    self.comments.upsert_comments(persisted_post.id, comments)
+                    total_comments += len(comments)
+                except Exception as exc:
+                    logger.warning(
+                        "Comment sync skipped for source=%s post=%s platform=%s: %s",
+                        source.id,
+                        normalized_post.external_post_id,
+                        source.platform.value,
+                        exc,
+                    )
 
             source.status = SourceStatusEnum.ready
             source.last_indexed_at = utcnow()
             self.sources.update(source)
             return {"posts": len(persisted_posts), "comments": total_comments}
         except Exception:
+            logger.exception(
+                "Source indexing failed for source=%s platform=%s since=%s until=%s limit=%s",
+                source.id,
+                source.platform.value,
+                since.isoformat() if since else None,
+                until.isoformat() if until else None,
+                posts_limit,
+            )
             source.status = SourceStatusEnum.failed
             self.sources.update(source)
             return {"posts": 0, "comments": 0}
