@@ -3,6 +3,8 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import re
+from collections import Counter
 
 from openai import OpenAI
 from redis import Redis
@@ -11,7 +13,95 @@ from app.core.config import get_settings
 
 logger = logging.getLogger(__name__)
 
-GENERIC_TOPICS = {"Общее обсуждение", "Общая реакция", "General discussion", "General reaction"}
+GENERIC_TOPICS = {
+    "Общее обсуждение",
+    "Общая реакция",
+    "General discussion",
+    "General reaction",
+}
+
+POST_THEME_STOPWORDS = {
+    "это",
+    "этот",
+    "эта",
+    "эти",
+    "который",
+    "которая",
+    "которые",
+    "которых",
+    "такой",
+    "такая",
+    "такие",
+    "также",
+    "просто",
+    "очень",
+    "снова",
+    "будет",
+    "будут",
+    "после",
+    "между",
+    "через",
+    "только",
+    "сегодня",
+    "вчера",
+    "завтра",
+    "здесь",
+    "там",
+    "того",
+    "тогда",
+    "потом",
+    "лишь",
+    "если",
+    "если",
+    "вот",
+    "все",
+    "всего",
+    "всем",
+    "всех",
+    "или",
+    "для",
+    "при",
+    "под",
+    "над",
+    "про",
+    "как",
+    "что",
+    "чтобы",
+    "где",
+    "когда",
+    "новость",
+    "новости",
+    "пост",
+    "посты",
+    "публикация",
+    "публикации",
+    "сообщение",
+    "сообщения",
+    "обсуждение",
+    "обсуждения",
+    "реакция",
+    "реакции",
+    "аудитория",
+    "аудитории",
+    "комментарий",
+    "комментарии",
+    "комментариях",
+    "telegram",
+    "телеграм",
+    "vk",
+    "канал",
+    "канале",
+    "каналы",
+    "сообщество",
+    "сообщества",
+    "город",
+    "города",
+    "городе",
+    "люди",
+    "людей",
+    "жители",
+    "житель",
+}
 
 
 class SummaryGenerator:
@@ -42,22 +132,22 @@ class SummaryGenerator:
                 )
                 completion = client.chat.completions.create(
                     model=self.settings.openai_compatible_model,
-                    temperature=0.1,
+                    temperature=0,
                     max_tokens=320,
                     messages=[
                         {
                             "role": "system",
                             "content": (
-                                "Ты готовишь аналитическую записку по реакции аудитории. "
-                                "Тебе переданы: тема и keywords постов, пользовательский prompt для анализа комментариев, "
-                                "метрики, значимые темы, сигналы, примеры комментариев и примеры постов. "
-                                "Нужно ответить именно на пользовательский prompt, а не пересказывать общую статистику. "
-                                "Пиши по-русски, четко, предметно и без воды. "
-                                "Если данных мало, прямо скажи, что выводы предварительные. "
-                                "Не делай формальный шаблон с обязательными блоками. "
-                                "Подзаголовки допустимы только если реально помогают сделать вывод понятнее. "
-                                "Не опирайся на generic-темы вроде 'Общее обсуждение' как на смысловой вывод. "
-                                "Главный результат должен быть практичным: что вызывает интерес, что вызывает негатив, какие паттерны реакции видны и насколько вывод надежен."
+                                "Ты готовишь прикладную аналитическую записку по реакции аудитории на новости и посты. "
+                                "Твоя главная задача — ответить именно на пользовательский запрос, а не пересказывать сырые поля отчета. "
+                                "Сначала определи 2-5 конкретных тем новостей/постов по полям post_theme_candidates, matched_posts, "
+                                "top_popular_posts и top_unpopular_posts. Затем объясни, какие темы вызвали интерес, какие — негатив, "
+                                "и какие паттерны реакции видны в комментариях. "
+                                "Нельзя использовать generic-формулировки вроде 'Общее обсуждение' как основной вывод. "
+                                "Нельзя строить ответ вокруг процентов без интерпретации смысла. "
+                                "Если данных мало или вывод ненадежен, скажи это прямо и коротко. "
+                                "Пиши по-русски, предметно, ясно и без воды. Верни один цельный, хорошо структурированный аналитический текст, "
+                                "который можно показать заказчику как итог по заданному prompt."
                             ),
                         },
                         {
@@ -83,25 +173,33 @@ class SummaryGenerator:
 
     def _build_summary_payload(self, report_json: dict, prompt_text: str | None) -> dict:
         examples = report_json.get("examples", {})
-        topics = [
+        posts = report_json.get("posts", {})
+        matched_posts = (posts.get("matched", []) or [])[:8]
+        top_popular = (posts.get("top_popular", []) or [])[:5]
+        top_unpopular = (posts.get("top_unpopular", []) or [])[:5]
+        max_examples = self.settings.llm_summary_max_examples_per_bucket
+
+        meaningful_topics = [
             topic
             for topic in (report_json.get("topics", []) or [])
             if (topic.get("name") or "").strip() not in GENERIC_TOPICS
         ][: self.settings.llm_summary_max_topics]
-        max_examples = self.settings.llm_summary_max_examples_per_bucket
+
+        post_theme_candidates = self._extract_post_theme_candidates(matched_posts + top_popular + top_unpopular)
 
         return {
             "analysis_request": {
-                "post_theme": report_json.get("meta", {}).get("post_theme"),
-                "post_keywords": report_json.get("meta", {}).get("post_keywords", []),
-                "prompt_for_comment_analysis": prompt_text or "",
+                "theme_of_posts": report_json.get("meta", {}).get("post_theme"),
+                "keywords_for_posts": report_json.get("meta", {}).get("post_keywords", []),
+                "prompt_for_comment_analysis": (prompt_text or "").strip(),
                 "period_from": report_json.get("meta", {}).get("period_from"),
                 "period_to": report_json.get("meta", {}).get("period_to"),
                 "platforms": report_json.get("meta", {}).get("platforms", []),
             },
             "coverage": report_json.get("stats", {}),
             "sentiment_distribution": report_json.get("sentiment", {}),
-            "meaningful_topics": topics,
+            "meaningful_comment_topics": meaningful_topics,
+            "post_theme_candidates": post_theme_candidates,
             "liked_patterns": report_json.get("insights", {}).get("liked_patterns", []),
             "disliked_patterns": report_json.get("insights", {}).get("disliked_patterns", []),
             "comment_examples": {
@@ -109,39 +207,107 @@ class SummaryGenerator:
                 "negative": (examples.get("negative_comments", []) or [])[:max_examples],
                 "neutral": (examples.get("neutral_comments", []) or [])[:max_examples],
             },
-            "matched_posts": (report_json.get("posts", {}).get("matched", []) or [])[:5],
-            "top_popular_posts": (report_json.get("posts", {}).get("top_popular", []) or [])[:3],
-            "top_unpopular_posts": (report_json.get("posts", {}).get("top_unpopular", []) or [])[:3],
+            "matched_posts": [self._compact_post(post) for post in matched_posts],
+            "top_popular_posts": [self._compact_post(post) for post in top_popular],
+            "top_unpopular_posts": [self._compact_post(post) for post in top_unpopular],
+        }
+
+    def _extract_post_theme_candidates(self, posts: list[dict]) -> list[str]:
+        unigram_counter: Counter[str] = Counter()
+        bigram_counter: Counter[str] = Counter()
+
+        for post in posts:
+            text = self._normalize_text(post.get("post_text") or "")
+            tokens = [token for token in re.findall(r"[a-zа-я0-9-]{3,}", text) if not token.isdigit()]
+            filtered = [token for token in tokens if token not in POST_THEME_STOPWORDS]
+
+            for token in filtered:
+                unigram_counter[token] += 1
+
+            for left, right in zip(filtered, filtered[1:]):
+                if left == right:
+                    continue
+                bigram_counter[f"{left} {right}"] += 1
+
+        themes: list[str] = []
+        for phrase, count in bigram_counter.most_common(12):
+            if count < 2:
+                continue
+            if any(part in POST_THEME_STOPWORDS for part in phrase.split()):
+                continue
+            themes.append(self._titleize_phrase(phrase))
+            if len(themes) >= 5:
+                break
+
+        if len(themes) < 5:
+            for token, count in unigram_counter.most_common(20):
+                if count < 2:
+                    continue
+                title = self._titleize_phrase(token)
+                if title not in themes:
+                    themes.append(title)
+                if len(themes) >= 8:
+                    break
+
+        return themes[:8]
+
+    def _compact_post(self, post: dict) -> dict:
+        return {
+            "post_text": self._shorten(post.get("post_text") or "", limit=220),
+            "score": post.get("score", 0),
+            "comments_count": post.get("comments_count", 0),
         }
 
     def _build_fallback_summary(self, report_json: dict, prompt_text: str | None = None) -> str:
         stats = report_json.get("stats", {})
         sentiment = report_json.get("sentiment", {})
-        topics = [
-            topic
-            for topic in (report_json.get("topics", []) or [])
-            if (topic.get("name") or "").strip() not in GENERIC_TOPICS
-        ]
+        posts = (report_json.get("posts", {}).get("matched", []) or [])[:8]
+        post_topics = self._extract_post_theme_candidates(posts)
+        prompt = (prompt_text or "").strip() or "анализ реакции аудитории"
 
         total_posts = int(stats.get("total_posts", 0) or 0)
         analyzed_comments = int(stats.get("analyzed_comments", 0) or 0)
 
         if analyzed_comments <= 0:
-            return "По выбранной теме и заданному запросу не нашлось достаточного количества релевантных комментариев для уверенного вывода."
+            return (
+                f"По запросу «{prompt}» релевантные комментарии не найдены. "
+                "По текущей выборке нельзя сделать содержательный вывод о реакции аудитории."
+            )
 
         if analyzed_comments < 10 or total_posts < 2:
             return (
-                f"По запросу «{(prompt_text or '').strip() or 'анализ реакции аудитории'}» данных пока недостаточно для уверенного вывода: "
-                f"в выборке {total_posts} постов и {analyzed_comments} релевантных комментариев. "
-                "Стоит расширить период, добавить больше источников или ослабить фильтр темы."
+                f"По запросу «{prompt}» данных пока недостаточно для уверенного вывода: "
+                f"в анализ попали {total_posts} постов и {analyzed_comments} релевантных комментариев. "
+                "Сейчас можно зафиксировать только предварительный сигнал, но не устойчивую картину реакции аудитории."
             )
 
-        lead_topic = topics[0]["name"] if topics else None
-        topic_part = f" Наиболее содержательные обсуждения связаны с темой «{lead_topic}»." if lead_topic else ""
+        topic_sentence = ""
+        if post_topics:
+            topic_sentence = (
+                f"Наиболее заметные темы самих новостей и постов в текущей выборке: {', '.join(post_topics[:4])}. "
+            )
 
         return (
-            f"По запросу «{(prompt_text or '').strip() or 'анализ реакции аудитории'}» аудитория в основном реагирует нейтрально, "
-            f"но заметны различимые сигналы интереса и негатива: позитив {sentiment.get('positive_percent', 0)}%, "
-            f"негатив {sentiment.get('negative_percent', 0)}%, нейтрально {sentiment.get('neutral_percent', 0)}%."
-            f"{topic_part} Для более точного вывода стоит опираться на больший объем релевантных комментариев и примеров постов."
+            f"По запросу «{prompt}» в выборке просматривается следующая картина. "
+            f"{topic_sentence}"
+            f"Комментарийная реакция в основном нейтральная, но внутри обсуждений есть различимые сигналы интереса и негатива: "
+            f"позитив {sentiment.get('positive_percent', 0)}%, негатив {sentiment.get('negative_percent', 0)}%, "
+            f"нейтрально {sentiment.get('neutral_percent', 0)}%. "
+            "Для сильного аналитического вывода стоит опираться на более широкий объем релевантных комментариев и большее число постов, "
+            "но уже сейчас можно анализировать не абстрактное «общее обсуждение», а конкретные темы самих новостей."
         )
+
+    def _normalize_text(self, value: str) -> str:
+        return " ".join(value.lower().replace("ё", "е").split())
+
+    def _titleize_phrase(self, phrase: str) -> str:
+        parts = [part for part in phrase.split() if part]
+        if not parts:
+            return phrase
+        return " ".join(parts).capitalize()
+
+    def _shorten(self, value: str, limit: int = 140) -> str:
+        compact = " ".join(value.split())
+        if len(compact) <= limit:
+            return compact
+        return compact[: limit - 3].rstrip() + "..."
