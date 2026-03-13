@@ -13,6 +13,7 @@ export function Sidebar() {
   const pathname = usePathname();
   const projectsQuery = useProjects();
   const reportsTreeQuery = useReportsTree();
+  const [openReports, setOpenReports] = useState(pathname.includes("/reports/"));
   const [openProjects, setOpenProjects] = useState<Record<string, boolean>>({});
 
   const reportMap = useMemo(
@@ -52,85 +53,98 @@ export function Sidebar() {
           </Link>
 
           <div className="rounded-[22px] border border-white/10 bg-white/[0.03] px-4 py-4">
-            <div className="flex items-center gap-3">
-              <span className="rounded-xl bg-cyan-400/10 p-2 text-cyan-200">
-                <FileText className="h-4 w-4" />
-              </span>
-              <div>
-                <div className="text-sm font-medium text-foreground">Reports</div>
-                <div className="text-xs text-muted-foreground">Saved reports by project</div>
+            <button
+              type="button"
+              onClick={() => setOpenReports((value) => !value)}
+              className="flex w-full items-center justify-between gap-3 text-left"
+            >
+              <div className="flex items-center gap-3">
+                <span className="rounded-xl bg-cyan-400/10 p-2 text-cyan-200">
+                  <FileText className="h-4 w-4" />
+                </span>
+                <div>
+                  <div className="text-sm font-medium text-foreground">Reports</div>
+                  <div className="text-xs text-muted-foreground">Saved reports by project</div>
+                </div>
               </div>
-            </div>
+              {openReports ? (
+                <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+              ) : (
+                <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+              )}
+            </button>
 
-            <div className="mt-4 space-y-2">
-              {(projectsQuery.data ?? []).map((project) => {
-                const reports = reportMap.get(project.id) ?? [];
-                const hasActiveReport = pathname.startsWith(`/projects/${project.id}/reports/`);
-                const isOpen = openProjects[project.id] ?? hasActiveReport;
-                const groupedReports = reports.reduce<Record<string, typeof reports>>((acc, report) => {
-                  const key = formatReportGroupDate(report.created_at);
-                  acc[key] = [...(acc[key] ?? []), report];
-                  return acc;
-                }, {});
+            {openReports ? (
+              <div className="mt-4 space-y-2">
+                {(projectsQuery.data ?? []).map((project) => {
+                  const reports = reportMap.get(project.id) ?? [];
+                  const hasActiveReport = pathname.startsWith(`/projects/${project.id}/reports/`);
+                  const isOpen = openProjects[project.id] ?? hasActiveReport;
+                  const groupedReports = reports.reduce<Record<string, typeof reports>>((acc, report) => {
+                    const key = formatReportGroupDate(report.created_at);
+                    acc[key] = [...(acc[key] ?? []), report];
+                    return acc;
+                  }, {});
 
-                return (
-                  <div key={project.id} className="rounded-2xl border border-white/8 bg-white/[0.025]">
-                    <button
-                      type="button"
-                      onClick={() => toggleProject(project.id)}
-                      className="flex w-full items-center justify-between gap-3 px-3 py-3 text-left transition hover:bg-white/[0.04]"
-                    >
-                      <div className="min-w-0">
-                        <div className={cn("truncate text-sm font-medium", hasActiveReport ? "text-cyan-100" : "text-foreground")}>
-                          {project.name}
-                        </div>
-                        <div className="text-xs text-muted-foreground">{reports.length} reports</div>
-                      </div>
-                      {isOpen ? (
-                        <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
-                      ) : (
-                        <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
-                      )}
-                    </button>
-
-                    {isOpen ? (
-                      <div className="border-t border-white/8 px-2 py-2">
-                        {reports.length ? (
-                          <div className="space-y-3">
-                            {Object.entries(groupedReports).map(([dateLabel, grouped]) => (
-                              <div key={dateLabel} className="space-y-1">
-                                <div className="px-3 text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground/80">
-                                  {dateLabel}
-                                </div>
-                                {grouped.map((report) => {
-                                  const isActive = pathname === `/projects/${project.id}/reports/${report.analysis_run_id}`;
-                                  return (
-                                    <Link
-                                      key={report.analysis_run_id}
-                                      href={`/projects/${project.id}/reports/${report.analysis_run_id}`}
-                                      className={cn(
-                                        "block rounded-xl px-3 py-2 text-sm transition",
-                                        isActive
-                                          ? "bg-cyan-400/[0.10] text-cyan-50 ring-1 ring-cyan-300/20"
-                                          : "text-muted-foreground hover:bg-white/[0.05] hover:text-foreground"
-                                      )}
-                                    >
-                                      <div className="line-clamp-2">{report.title}</div>
-                                    </Link>
-                                  );
-                                })}
-                              </div>
-                            ))}
+                  return (
+                    <div key={project.id} className="rounded-2xl border border-white/8 bg-white/[0.025]">
+                      <button
+                        type="button"
+                        onClick={() => toggleProject(project.id)}
+                        className="flex w-full items-center justify-between gap-3 px-3 py-3 text-left transition hover:bg-white/[0.04]"
+                      >
+                        <div className="min-w-0">
+                          <div className={cn("truncate text-sm font-medium", hasActiveReport ? "text-cyan-100" : "text-foreground")}>
+                            {project.name}
                           </div>
+                          <div className="text-xs text-muted-foreground">{reports.length} reports</div>
+                        </div>
+                        {isOpen ? (
+                          <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
                         ) : (
-                          <div className="px-3 py-2 text-xs text-muted-foreground">No reports yet</div>
+                          <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
                         )}
-                      </div>
-                    ) : null}
-                  </div>
-                );
-              })}
-            </div>
+                      </button>
+
+                      {isOpen ? (
+                        <div className="border-t border-white/8 px-2 py-2">
+                          {reports.length ? (
+                            <div className="space-y-3">
+                              {Object.entries(groupedReports).map(([dateLabel, grouped]) => (
+                                <div key={dateLabel} className="space-y-1">
+                                  <div className="px-3 text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground/80">
+                                    {dateLabel}
+                                  </div>
+                                  {grouped.map((report) => {
+                                    const isActive = pathname === `/projects/${project.id}/reports/${report.analysis_run_id}`;
+                                    return (
+                                      <Link
+                                        key={report.analysis_run_id}
+                                        href={`/projects/${project.id}/reports/${report.analysis_run_id}`}
+                                        className={cn(
+                                          "block rounded-xl px-3 py-2 text-sm transition",
+                                          isActive
+                                            ? "bg-cyan-400/[0.10] text-cyan-50 ring-1 ring-cyan-300/20"
+                                            : "text-muted-foreground hover:bg-white/[0.05] hover:text-foreground"
+                                        )}
+                                      >
+                                        <div className="line-clamp-2">{report.title}</div>
+                                      </Link>
+                                    );
+                                  })}
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <div className="px-3 py-2 text-xs text-muted-foreground">No reports yet</div>
+                          )}
+                        </div>
+                      ) : null}
+                    </div>
+                  );
+                })}
+              </div>
+            ) : null}
           </div>
         </nav>
       </div>
