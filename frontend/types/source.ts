@@ -39,6 +39,7 @@ export interface IndexStatusResponse {
   status_breakdown: Record<string, number>;
   progress: {
     percent: number;
+    overall_percent: number;
     current_source_title: string | null;
     current_source_index: number;
     total_sources: number;

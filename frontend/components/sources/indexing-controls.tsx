@@ -26,6 +26,7 @@ export function IndexingControls({
   isPending: boolean;
   progress?: {
     percent: number;
+    overall_percent: number;
     current_source_title: string | null;
     current_source_index: number;
     total_sources: number;
@@ -189,7 +190,12 @@ export function IndexingControls({
                 />
               </div>
               <div className="mt-2 text-xs text-muted-foreground">
-                {progress.posts_label ?? `${progress.completed_sources}/${progress.total_sources} sources completed`}
+                <div>{progress.posts_label ?? "Preparing posts..."}</div>
+                <div className="mt-1">
+                  Source {Math.max(progress.current_source_index, progress.completed_sources + 1)}/{progress.total_sources}
+                  {" · "}
+                  Overall {progress.overall_percent.toFixed(0)}%
+                </div>
               </div>
             </div>
           ) : null}

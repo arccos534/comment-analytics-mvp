@@ -144,12 +144,11 @@ def build_progress_summary(project_id: str) -> dict | None:
     if total_posts > 0:
         current_fraction = min(processed_posts / total_posts, 1.0)
 
+    current_source_percent = round(max(0.0, min(current_fraction * 100, 100.0)), 1)
     if total_sources > 0:
-        progress_percent = ((completed_sources + current_fraction) / total_sources) * 100
+        overall_percent = round(max(0.0, min(((completed_sources + current_fraction) / total_sources) * 100, 100.0)), 1)
     else:
-        progress_percent = 0.0
-
-    progress_percent = round(max(0.0, min(progress_percent, 100.0)), 1)
+        overall_percent = 0.0
 
     current_label = None
     if payload.get("current_source_title"):
@@ -160,7 +159,8 @@ def build_progress_summary(project_id: str) -> dict | None:
         posts_label = f"{processed_posts}/{total_posts} posts"
 
     return {
-        "percent": progress_percent,
+        "percent": current_source_percent,
+        "overall_percent": overall_percent,
         "current_source_title": current_label,
         "current_source_index": int(payload.get("current_source_index", 0) or 0),
         "total_sources": total_sources,
