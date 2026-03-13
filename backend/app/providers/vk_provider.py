@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -208,14 +209,23 @@ class VkProvider(BaseProvider):
             "access_token": self.settings.vk_api_token,
             "v": self.settings.vk_api_version,
         }
+        attempts = 5
         with httpx.Client(timeout=self.settings.provider_http_timeout_seconds) as client:
-            response = client.get(f"https://api.vk.com/method/{method}", params=query)
-        response.raise_for_status()
-        payload = response.json()
-        if payload.get("error"):
-            error = payload["error"]
-            raise ProviderRequestError(f"VK API {method} failed: {error.get('error_msg', 'unknown error')}")
-        return payload["response"]
+            for attempt in range(attempts):
+                response = client.get(f"https://api.vk.com/method/{method}", params=query)
+                response.raise_for_status()
+                payload = response.json()
+                if not payload.get("error"):
+                    return payload["response"]
+
+                error = payload["error"]
+                error_code = error.get("error_code")
+                if error_code == 6 and attempt < attempts - 1:
+                    time.sleep(0.35 * (attempt + 1))
+                    continue
+                raise ProviderRequestError(f"VK API {method} failed: {error.get('error_msg', 'unknown error')}")
+
+        raise ProviderRequestError(f"VK API {method} failed after retries")
 
     def _ensure_token(self) -> None:
         if not self.settings.vk_api_token:
@@ -339,10 +349,20 @@ class VkProvider(BaseProvider):
 
             for item in batch:
                 items.append(item)
-                nested_items, nested_profiles, nested_groups = self._fetch_comment_thread(owner_id, post_id, item["id"])
-                items.extend(nested_items)
-                profiles.update(nested_profiles)
-                groups.update(nested_groups)
+                thread = item.get("thread", {})
+                thread_items = thread.get("items", []) or []
+                items.extend(thread_items)
+
+                if thread.get("count", 0) > len(thread_items):
+                    nested_items, nested_profiles, nested_groups = self._fetch_comment_thread(
+                        owner_id,
+                        post_id,
+                        item["id"],
+                        initial_offset=len(thread_items),
+                    )
+                    items.extend(nested_items)
+                    profiles.update(nested_profiles)
+                    groups.update(nested_groups)
 
             offset += len(batch)
             if len(batch) < page_size:
@@ -355,9 +375,10 @@ class VkProvider(BaseProvider):
         owner_id: int,
         post_id: int,
         comment_id: int,
+        initial_offset: int = 0,
     ) -> tuple[list[dict[str, Any]], dict[int, dict[str, Any]], dict[int, dict[str, Any]]]:
         page_size = max(1, min(self.settings.ingestion_batch_size, 100))
-        offset = 0
+        offset = initial_offset
         items: list[dict[str, Any]] = []
         profiles: dict[int, dict[str, Any]] = {}
         groups: dict[int, dict[str, Any]] = {}
