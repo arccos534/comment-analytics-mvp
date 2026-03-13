@@ -139,15 +139,18 @@ class SummaryGenerator:
                             "role": "system",
                             "content": (
                                 "Ты готовишь прикладную аналитическую записку по реакции аудитории на новости и посты. "
-                                "Твоя главная задача — ответить именно на пользовательский запрос, а не пересказывать сырые поля отчета. "
-                                "Сначала определи 2-5 конкретных тем новостей/постов по полям post_theme_candidates, matched_posts, "
-                                "top_popular_posts и top_unpopular_posts. Затем объясни, какие темы вызвали интерес, какие — негатив, "
-                                "и какие паттерны реакции видны в комментариях. "
-                                "Нельзя использовать generic-формулировки вроде 'Общее обсуждение' как основной вывод. "
-                                "Нельзя строить ответ вокруг процентов без интерпретации смысла. "
-                                "Если данных мало или вывод ненадежен, скажи это прямо и коротко. "
-                                "Пиши по-русски, предметно, ясно и без воды. Верни один цельный, хорошо структурированный аналитический текст, "
-                                "который можно показать заказчику как итог по заданному prompt."
+                                "Нужно ответить именно на пользовательский запрос, а не пересказать поля отчета. "
+                                "Опирайся прежде всего на темы самих новостей и постов: post_theme_candidates, matched_posts, "
+                                "top_popular_posts и top_unpopular_posts. Темы комментариев используй только как дополнительный контекст. "
+                                "В итоговом тексте обязательно прямо ответь на четыре вопроса, даже если ответ по некоторым пунктам осторожный: "
+                                "1) какие новости или темы вызвали наибольший интерес аудитории; "
+                                "2) какие новости или темы вызвали негативные эмоции; "
+                                "3) к каким темам аудитория отнеслась скорее позитивно; "
+                                "4) к каким темам аудитория отнеслась скорее негативно. "
+                                "Нельзя использовать generic-формулировки вроде 'Общее обсуждение' как главный вывод. "
+                                "Нельзя ограничиваться процентами без объяснения, о каких темах идет речь. "
+                                "Если данных мало, скажи это прямо, но все равно дай максимально конкретный предварительный вывод по имеющимся данным. "
+                                "Пиши по-русски, предметно, короткими абзацами, без воды. Разрешены естественные подзаголовки, если они помогают читаемости."
                             ),
                         },
                         {
@@ -261,8 +264,20 @@ class SummaryGenerator:
     def _build_fallback_summary(self, report_json: dict, prompt_text: str | None = None) -> str:
         stats = report_json.get("stats", {})
         sentiment = report_json.get("sentiment", {})
-        posts = (report_json.get("posts", {}).get("matched", []) or [])[:8]
-        post_topics = self._extract_post_theme_candidates(posts)
+        posts = report_json.get("posts", {})
+        matched_posts = (posts.get("matched", []) or [])[:8]
+        popular_posts = (posts.get("top_popular", []) or [])[:5]
+        unpopular_posts = (posts.get("top_unpopular", []) or [])[:5]
+
+        post_topics = self._extract_post_theme_candidates(matched_posts)
+        interest_topics = self._extract_post_theme_candidates(popular_posts) or post_topics
+        low_engagement_topics = self._extract_post_theme_candidates(unpopular_posts)
+
+        liked_patterns = report_json.get("insights", {}).get("liked_patterns", []) or []
+        disliked_patterns = report_json.get("insights", {}).get("disliked_patterns", []) or []
+        positive_topics = self._extract_meaningful_comment_topics(report_json, positive=True)
+        negative_topics = self._extract_meaningful_comment_topics(report_json, positive=False)
+
         prompt = (prompt_text or "").strip() or "анализ реакции аудитории"
 
         total_posts = int(stats.get("total_posts", 0) or 0)
@@ -275,27 +290,91 @@ class SummaryGenerator:
             )
 
         if analyzed_comments < 10 or total_posts < 2:
+            concise_interest = self._join_list(interest_topics[:3]) or "выраженные темы интереса пока не выделяются"
+            concise_negative = self._join_list(negative_topics[:3] or disliked_patterns[:3]) or "устойчивые негативные темы пока не выделяются"
             return (
                 f"По запросу «{prompt}» данных пока недостаточно для уверенного вывода: "
                 f"в анализ попали {total_posts} постов и {analyzed_comments} релевантных комментариев. "
-                "Сейчас можно зафиксировать только предварительный сигнал, но не устойчивую картину реакции аудитории."
+                f"Предварительно можно сказать, что интерес аудитории чаще возникает вокруг тем: {concise_interest}. "
+                f"Негативные сигналы пока заметнее всего связаны с темами: {concise_negative}. "
+                "Этот вывод нужно считать предварительным, а не устойчивым."
             )
 
-        topic_sentence = ""
+        overview_line = ""
         if post_topics:
-            topic_sentence = (
-                f"Наиболее заметные темы самих новостей и постов в текущей выборке: {', '.join(post_topics[:4])}. "
-            )
+            overview_line = f"В текущей выборке заметнее всего темы самих новостей и постов: {self._join_list(post_topics[:4])}. "
+
+        interest_line = (
+            f"Наибольший интерес аудитории вызывают новости и посты на темы {self._join_list(interest_topics[:4])}. "
+            if interest_topics
+            else "Наиболее сильный интерес аудитории по текущей выборке не выделяется достаточно уверенно. "
+        )
+
+        negative_emotion_basis = negative_topics[:4] or disliked_patterns[:4] or low_engagement_topics[:4]
+        negative_line = (
+            f"Негативные эмоции чаще возникают вокруг тем {self._join_list(negative_emotion_basis)}. "
+            if negative_emotion_basis
+            else "Явно выраженные темы, которые стабильно вызывают негативные эмоции, по текущей выборке не выделяются. "
+        )
+
+        positive_basis = positive_topics[:4] or liked_patterns[:4] or interest_topics[:4]
+        positive_line = (
+            f"Скорее позитивно аудитория относится к темам {self._join_list(positive_basis)}. "
+            if positive_basis
+            else "Стабильные позитивные темы по текущей выборке выражены слабо. "
+        )
+
+        negative_attitude_basis = negative_topics[:4] or disliked_patterns[:4]
+        attitude_line = (
+            f"Скорее негативно аудитория относится к темам {self._join_list(negative_attitude_basis)}. "
+            if negative_attitude_basis
+            else "Устойчивой группы тем с явно отрицательным отношением аудитории по текущей выборке не видно. "
+        )
 
         return (
-            f"По запросу «{prompt}» в выборке просматривается следующая картина. "
-            f"{topic_sentence}"
-            f"Комментарийная реакция в основном нейтральная, но внутри обсуждений есть различимые сигналы интереса и негатива: "
-            f"позитив {sentiment.get('positive_percent', 0)}%, негатив {sentiment.get('negative_percent', 0)}%, "
-            f"нейтрально {sentiment.get('neutral_percent', 0)}%. "
-            "Для сильного аналитического вывода стоит опираться на более широкий объем релевантных комментариев и большее число постов, "
-            "но уже сейчас можно анализировать не абстрактное «общее обсуждение», а конкретные темы самих новостей."
+            f"По запросу «{prompt}» картина по текущей выборке выглядит так. "
+            f"{overview_line}"
+            f"{interest_line}"
+            f"{negative_line}"
+            f"{positive_line}"
+            f"{attitude_line}"
+            f"Распределение тональности по релевантным комментариям: позитив {sentiment.get('positive_percent', 0)}%, "
+            f"негатив {sentiment.get('negative_percent', 0)}%, нейтрально {sentiment.get('neutral_percent', 0)}%. "
+            "Если нужен более надежный вывод, стоит расширить выборку постов и релевантных комментариев."
         )
+
+    def _extract_meaningful_comment_topics(self, report_json: dict, positive: bool) -> list[str]:
+        examples_key = "positive_comments" if positive else "negative_comments"
+        examples = report_json.get("examples", {}).get(examples_key, []) or []
+        fallback_topics = [
+            (topic.get("name") or "").strip()
+            for topic in (report_json.get("topics", []) or [])
+            if (topic.get("name") or "").strip() and (topic.get("name") or "").strip() not in GENERIC_TOPICS
+        ]
+
+        counter: Counter[str] = Counter()
+        for example in examples:
+            text = self._normalize_text(example.get("text") or "")
+            tokens = [token for token in re.findall(r"[a-zа-я0-9-]{4,}", text) if token not in POST_THEME_STOPWORDS]
+            for token in tokens:
+                counter[token] += 1
+
+        extracted = [self._titleize_phrase(token) for token, count in counter.most_common(6) if count >= 1]
+        ordered = []
+        for topic in extracted + fallback_topics:
+            if topic and topic not in ordered:
+                ordered.append(topic)
+        return ordered[:6]
+
+    def _join_list(self, items: list[str]) -> str:
+        cleaned = [item for item in items if item]
+        if not cleaned:
+            return ""
+        if len(cleaned) == 1:
+            return cleaned[0]
+        if len(cleaned) == 2:
+            return f"{cleaned[0]} и {cleaned[1]}"
+        return ", ".join(cleaned[:-1]) + f" и {cleaned[-1]}"
 
     def _normalize_text(self, value: str) -> str:
         return " ".join(value.lower().replace("ё", "е").split())
