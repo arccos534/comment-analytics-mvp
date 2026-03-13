@@ -14,7 +14,7 @@ type IndexModeUi = "full" | "latest_posts" | "period";
 type PeriodOption = IndexPeriodPreset | "custom";
 
 const modeButtonClass =
-  "rounded-xl border px-3 py-2 text-sm transition data-[active=true]:border-primary data-[active=true]:bg-primary/15 data-[active=true]:text-foreground";
+  "rounded-xl border border-border/70 bg-card/50 px-3 py-2 text-sm text-muted-foreground transition hover:border-primary/40 hover:text-foreground data-[active=true]:border-primary data-[active=true]:bg-primary/15 data-[active=true]:text-foreground";
 
 export function IndexingControls({
   disabled,
@@ -96,7 +96,7 @@ export function IndexingControls({
             <Label htmlFor="latest-posts-limit">How many latest posts to fetch</Label>
             <Input
               id="latest-posts-limit"
-              className="bg-transparent"
+              className="bg-card/70"
               inputMode="numeric"
               min={1}
               placeholder="100"
@@ -113,7 +113,7 @@ export function IndexingControls({
               <Label htmlFor="period-preset">Period preset</Label>
               <Select
                 id="period-preset"
-                className="bg-transparent"
+                className="bg-card/70"
                 value={periodOption}
                 onChange={(event) => setPeriodOption(event.target.value as PeriodOption)}
               >
@@ -133,7 +133,7 @@ export function IndexingControls({
                   <Label htmlFor="period-from">From</Label>
                   <Input
                     id="period-from"
-                    className="bg-transparent"
+                    className="bg-card/70"
                     type="date"
                     value={periodFrom}
                     onChange={(event) => setPeriodFrom(event.target.value)}
@@ -143,7 +143,7 @@ export function IndexingControls({
                   <Label htmlFor="period-to">To</Label>
                   <Input
                     id="period-to"
-                    className="bg-transparent"
+                    className="bg-card/70"
                     type="date"
                     value={periodTo}
                     onChange={(event) => setPeriodTo(event.target.value)}

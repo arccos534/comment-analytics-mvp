@@ -31,3 +31,27 @@ body {
 * {
   @apply border-border;
 }
+
+select,
+input[type="date"],
+input[type="number"] {
+  color-scheme: dark;
+}
+
+select option {
+  background: rgb(16 23 34);
+  color: rgb(232 238 245);
+}
+
+input[type="date"]::-webkit-calendar-picker-indicator {
+  cursor: pointer;
+  filter: invert(0.82) sepia(0.08) saturate(0.5) brightness(1.05);
+}
+
+input[type="date"]::-webkit-datetime-edit,
+input[type="date"]::-webkit-datetime-edit-text,
+input[type="date"]::-webkit-datetime-edit-month-field,
+input[type="date"]::-webkit-datetime-edit-day-field,
+input[type="date"]::-webkit-datetime-edit-year-field {
+  color: rgb(232 238 245);
+}
