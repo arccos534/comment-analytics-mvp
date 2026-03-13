@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import math
 import re
 from functools import lru_cache
 
@@ -21,6 +20,17 @@ def _load_model():
     settings = get_settings()
     if not SentenceTransformer:
         return None
+
+
+@lru_cache(maxsize=64)
+def _encode_baseline(text: str):
+    model = _load_model()
+    if not model or not text:
+        return None
+    try:
+        return model.encode(text, normalize_embeddings=True)
+    except Exception:
+        return None
     try:
         return SentenceTransformer(settings.sentence_transformer_model)
     except Exception:
@@ -36,7 +46,9 @@ class RelevanceScorer:
         if model:
             try:
                 text_embedding = model.encode(text, normalize_embeddings=True)
-                baseline_embedding = model.encode(baseline, normalize_embeddings=True)
+                baseline_embedding = _encode_baseline(baseline)
+                if baseline_embedding is None:
+                    raise ValueError("baseline embedding unavailable")
                 cosine = float(text_embedding @ baseline_embedding)
                 return round(max(0.0, min(1.0, (cosine + 1) / 2)), 4)
             except Exception:

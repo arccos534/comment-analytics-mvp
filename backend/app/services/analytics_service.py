@@ -175,6 +175,7 @@ class AnalyticsService:
                     topics_json=topics,
                     keywords_json=extracted_keywords,
                     relevance_score=relevance_score,
+                    commit=False,
                 )
                 enriched_comments.append(
                     {
@@ -188,6 +189,8 @@ class AnalyticsService:
                         "relevance_score": relevance_score,
                     }
                 )
+
+            self.db.commit()
 
             report_json = self.aggregator.build_report(
                 run=run,

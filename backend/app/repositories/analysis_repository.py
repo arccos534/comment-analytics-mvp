@@ -48,6 +48,7 @@ class AnalysisRepository:
         keywords_json: list[str],
         relevance_score: float | None,
         toxicity_score: float | None = None,
+        commit: bool = True,
     ) -> CommentAnalysis:
         analysis = self.db.scalar(select(CommentAnalysis).where(CommentAnalysis.comment_id == comment_id))
         if not analysis:
@@ -68,8 +69,9 @@ class AnalysisRepository:
             analysis.keywords_json = keywords_json
             analysis.relevance_score = relevance_score
             analysis.toxicity_score = toxicity_score
-        self.db.commit()
-        self.db.refresh(analysis)
+        if commit:
+            self.db.commit()
+            self.db.refresh(analysis)
         return analysis
 
     def replace_report_snapshot(self, analysis_run_id: UUID, report_json: dict, summary_text: str | None) -> ReportSnapshot:
