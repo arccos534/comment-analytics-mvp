@@ -17,9 +17,9 @@ export function AnalyticsForm({ projectId, sources }: { projectId: string; sourc
   const runAnalysis = useRunAnalysis(projectId);
   const setLatestAnalysisRunId = useUiStore((state) => state.setLatestAnalysisRunId);
 
-  const [promptText, setPromptText] = useState("Проанализируй реакцию аудитории в комментариях: что нравится, что не нравится и какие сигналы повторяются.");
-  const [theme, setTheme] = useState("Продукт и пользовательский опыт");
-  const [keywords, setKeywords] = useState("цена, качество, поддержка, доставка");
+  const [promptText, setPromptText] = useState("");
+  const [theme, setTheme] = useState("");
+  const [keywords, setKeywords] = useState("");
   const [periodFrom, setPeriodFrom] = useState("");
   const [periodTo, setPeriodTo] = useState("");
   const [platforms, setPlatforms] = useState<string[]>(["telegram", "vk"]);
@@ -65,7 +65,7 @@ export function AnalyticsForm({ projectId, sources }: { projectId: string; sourc
               id="theme"
               value={theme}
               onChange={(event) => setTheme(event.target.value)}
-              placeholder="Например: обновление продукта, цены, доставка"
+              placeholder="Например: благоустройство города, дворы, дороги"
             />
           </div>
           <div className="space-y-2">
@@ -74,7 +74,7 @@ export function AnalyticsForm({ projectId, sources }: { projectId: string; sourc
               id="keywords"
               value={keywords}
               onChange={(event) => setKeywords(event.target.value)}
-              placeholder="Например: цена, тариф, доставка, поддержка"
+              placeholder="Например: парковка, тротуары, освещение"
             />
           </div>
           <div className="space-y-2">
@@ -83,7 +83,7 @@ export function AnalyticsForm({ projectId, sources }: { projectId: string; sourc
               id="prompt"
               value={promptText}
               onChange={(event) => setPromptText(event.target.value)}
-              placeholder="Например: найди основные претензии аудитории и частые позитивные сигналы"
+              placeholder="Например: найди основные претензии и позитивные сигналы"
             />
           </div>
           <div className="grid gap-4 sm:grid-cols-2">
