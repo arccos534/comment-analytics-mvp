@@ -20,7 +20,7 @@ const DISPLAY_OPTIONS = [3, 5, 10, 20];
 export default function ReportPage({ params }: { params: { projectId: string; reportId: string } }) {
   const runQuery = useAnalysisRun(params.reportId);
   const reportQuery = useReport(params.reportId, runQuery.data?.status === "completed");
-  const [showPostPanels, setShowPostPanels] = useState(true);
+  const [showPostPanels, setShowPostPanels] = useState(false);
   const [postsLimit, setPostsLimit] = useState("5");
 
   if (runQuery.isLoading) {
@@ -70,14 +70,14 @@ export default function ReportPage({ params }: { params: { projectId: string; re
 
       <div className="flex flex-col gap-4 rounded-2xl border border-white/10 bg-card/50 px-4 py-4 backdrop-blur md:flex-row md:items-center md:justify-between">
         <div>
-          <div className="text-sm font-medium text-foreground">Posts by scope and engagement</div>
+          <div className="text-sm font-medium text-foreground">Посты в выборке</div>
           <div className="text-xs text-muted-foreground">
-            Matched posts plus the most and least engaging posts inside the current report selection.
+            Посты, попавшие в анализ, а также самые популярные и наименее популярные посты в текущей выборке.
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-3">
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <span>Show</span>
+            <span>Показывать</span>
             <Select className="h-10 w-24 bg-card/70" value={postsLimit} onChange={(event) => setPostsLimit(event.target.value)}>
               {DISPLAY_OPTIONS.map((option) => (
                 <option key={option} value={String(option)}>
@@ -90,12 +90,12 @@ export default function ReportPage({ params }: { params: { projectId: string; re
             {showPostPanels ? (
               <>
                 <ChevronUp className="mr-2 h-4 w-4" />
-                Hide posts
+                Скрыть посты
               </>
             ) : (
               <>
                 <ChevronDown className="mr-2 h-4 w-4" />
-                Show posts
+                Показать посты
               </>
             )}
           </Button>
@@ -104,9 +104,9 @@ export default function ReportPage({ params }: { params: { projectId: string; re
 
       {showPostPanels ? (
         <div className="grid gap-5 xl:grid-cols-3">
-          <TopPostsCard title="Matched posts" posts={(report.posts.matched || []).slice(0, visibleLimit)} />
-          <TopPostsCard title="Top popular posts" posts={(report.posts.top_popular || []).slice(0, visibleLimit)} />
-          <TopPostsCard title="Top unpopular posts" posts={(report.posts.top_unpopular || []).slice(0, visibleLimit)} />
+          <TopPostsCard title="Посты в выборке" posts={(report.posts.matched || []).slice(0, visibleLimit)} />
+          <TopPostsCard title="Топ популярных постов" posts={(report.posts.top_popular || []).slice(0, visibleLimit)} />
+          <TopPostsCard title="Топ непопулярных постов" posts={(report.posts.top_unpopular || []).slice(0, visibleLimit)} />
         </div>
       ) : null}
     </div>
