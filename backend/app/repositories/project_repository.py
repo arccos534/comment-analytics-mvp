@@ -30,6 +30,14 @@ class ProjectRepository:
         self.db.refresh(project)
         return project
 
+    def delete(self, project_id: UUID) -> bool:
+        project = self.get(project_id)
+        if not project:
+            return False
+        self.db.delete(project)
+        self.db.commit()
+        return True
+
     def get_stats(self, project_id: UUID) -> ProjectStats:
         source_count = self.db.scalar(select(func.count(Source.id)).where(Source.project_id == project_id)) or 0
         post_count = self.db.scalar(

@@ -10,7 +10,7 @@ const headingFont = Manrope({ subsets: ["latin", "cyrillic"], variable: "--font-
 const bodyFont = IBM_Plex_Sans({ subsets: ["latin", "cyrillic"], weight: ["400", "500", "600"], variable: "--font-body" });
 
 export const metadata: Metadata = {
-  title: "Comment Analytics MVP",
+  title: "Dashboard by arccos",
   description: "Analytics workspace for Telegram and VK comments."
 };
 

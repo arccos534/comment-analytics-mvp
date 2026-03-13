@@ -35,7 +35,7 @@ export function CreateProjectDialog() {
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button size="lg">Create project</Button>
+        <Button size="lg">Create database</Button>
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>

@@ -21,6 +21,9 @@ class ProjectService:
     def create_project(self, payload: ProjectCreate):
         return self.projects.create(payload)
 
+    def delete_project(self, project_id: UUID) -> bool:
+        return self.projects.delete(project_id)
+
     def get_project_detail(self, project_id: UUID) -> ProjectDetail | None:
         project = self.projects.get(project_id)
         if not project:

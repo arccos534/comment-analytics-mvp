@@ -19,6 +19,10 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
     throw new Error(payload.detail ?? "Request failed");
   }
 
+  if (response.status === 204) {
+    return undefined as T;
+  }
+
   return response.json();
 }
 
@@ -26,6 +30,7 @@ export const api = {
   listProjects: () => apiFetch<Project[]>("/projects"),
   createProject: (payload: { name: string; description?: string }) =>
     apiFetch<Project>("/projects", { method: "POST", body: JSON.stringify(payload) }),
+  deleteProject: (projectId: string) => apiFetch<void>(`/projects/${projectId}`, { method: "DELETE" }),
   getProject: (projectId: string) => apiFetch<ProjectDetail>(`/projects/${projectId}`),
   listSources: (projectId: string) => apiFetch<Source[]>(`/projects/${projectId}/sources`),
   validateSources: (urls: string[]) =>
