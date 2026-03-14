@@ -43,6 +43,7 @@ POST_THEME_STOPWORDS = {
     "завтра",
     "здесь",
     "там",
+    "тоже",
     "тогда",
     "потом",
     "если",
@@ -152,6 +153,33 @@ POST_THEME_STOPWORDS = {
     "людей",
     "жители",
     "житель",
+}
+
+VERBISH_THEME_TOKENS = {
+    "быть",
+    "будет",
+    "будут",
+    "стал",
+    "стала",
+    "стали",
+    "может",
+    "могут",
+    "будем",
+    "будешь",
+    "смогут",
+    "работать",
+    "отключать",
+    "замедлять",
+    "вызвать",
+    "вызывать",
+    "обсуждать",
+    "считать",
+    "считает",
+    "заявить",
+    "сообщить",
+    "говорить",
+    "показать",
+    "рассказать",
 }
 
 PROMPT_STOPWORDS = POST_THEME_STOPWORDS | {
@@ -446,31 +474,51 @@ class SummaryGenerator:
 
         unigram_counter: Counter[str] = Counter()
         bigram_counter: Counter[str] = Counter()
+        trigram_counter: Counter[str] = Counter()
 
         for post in posts:
             text = self._normalize_text(post.get("post_text") or "")
-            tokens = [token for token in re.findall(r"[a-zа-я0-9-]{3,}", text) if not token.isdigit()]
-            filtered = [token for token in tokens if token not in POST_THEME_STOPWORDS]
+            for sentence in self._split_into_sentences(text):
+                tokens = [token for token in re.findall(r"[a-zа-я0-9-]{3,}", sentence) if not token.isdigit()]
+                filtered = [token for token in tokens if self._is_theme_token(token)]
 
-            unique_tokens = list(dict.fromkeys(filtered))
-            for token in unique_tokens:
-                unigram_counter[token] += 1
+                unique_tokens = list(dict.fromkeys(filtered))
+                for token in unique_tokens:
+                    unigram_counter[token] += 1
 
-            seen_bigrams: set[str] = set()
-            for left, right in zip(filtered, filtered[1:]):
-                if left == right:
-                    continue
-                phrase = f"{left} {right}"
-                if phrase in seen_bigrams:
-                    continue
-                seen_bigrams.add(phrase)
-                bigram_counter[phrase] += 1
+                seen_bigrams: set[str] = set()
+                for left, right in zip(filtered, filtered[1:]):
+                    if left == right or not self._is_theme_phrase((left, right)):
+                        continue
+                    phrase = f"{left} {right}"
+                    if phrase in seen_bigrams:
+                        continue
+                    seen_bigrams.add(phrase)
+                    bigram_counter[phrase] += 1
+
+                seen_trigrams: set[str] = set()
+                for first, second, third in zip(filtered, filtered[1:], filtered[2:]):
+                    phrase_tokens = (first, second, third)
+                    if not self._is_theme_phrase(phrase_tokens):
+                        continue
+                    phrase = " ".join(phrase_tokens)
+                    if phrase in seen_trigrams:
+                        continue
+                    seen_trigrams.add(phrase)
+                    trigram_counter[phrase] += 1
 
         themes: list[str] = []
-        for phrase, count in bigram_counter.most_common(16):
+        for phrase, count in trigram_counter.most_common(16):
             if count < 2:
                 continue
-            if any(part in POST_THEME_STOPWORDS for part in phrase.split()):
+            title = self._titleize_phrase(phrase)
+            if title not in themes:
+                themes.append(title)
+            if len(themes) >= 4:
+                break
+
+        for phrase, count in bigram_counter.most_common(16):
+            if count < 2:
                 continue
             title = self._titleize_phrase(phrase)
             if title not in themes:
@@ -489,6 +537,73 @@ class SummaryGenerator:
                     break
 
         return themes[:8]
+
+    def _split_into_sentences(self, text: str) -> list[str]:
+        chunks = [chunk.strip() for chunk in re.split(r"[.!?…:\n\r]+", text) if chunk.strip()]
+        return chunks or [text]
+
+    def _is_theme_token(self, token: str) -> bool:
+        if token in POST_THEME_STOPWORDS or token in VERBISH_THEME_TOKENS:
+            return False
+        if len(token) < 4:
+            return False
+        if self._looks_like_verb(token):
+            return False
+        return True
+
+    def _is_theme_phrase(self, tokens: tuple[str, ...]) -> bool:
+        if any(not self._is_theme_token(token) for token in tokens):
+            return False
+        if len(set(tokens)) != len(tokens):
+            return False
+        return any(not self._looks_like_adjective(token) for token in tokens)
+
+    def _looks_like_verb(self, token: str) -> bool:
+        verb_endings = (
+            "ать",
+            "ять",
+            "еть",
+            "ить",
+            "ыть",
+            "уть",
+            "ться",
+            "ти",
+            "чь",
+            "ется",
+            "утся",
+            "ются",
+            "ится",
+            "атся",
+            "ятся",
+            "ет",
+            "ут",
+            "ют",
+            "ит",
+            "ат",
+            "ят",
+        )
+        if token in VERBISH_THEME_TOKENS:
+            return True
+        return token.endswith(verb_endings)
+
+    def _looks_like_adjective(self, token: str) -> bool:
+        adjective_endings = (
+            "ый",
+            "ий",
+            "ой",
+            "ая",
+            "ое",
+            "ые",
+            "ого",
+            "ему",
+            "ому",
+            "ыми",
+            "ими",
+            "ую",
+            "яя",
+            "ее",
+        )
+        return token.endswith(adjective_endings)
 
     def _extract_comment_signal_topics(self, report_json: dict, bucket: str) -> list[str]:
         example_key = {
