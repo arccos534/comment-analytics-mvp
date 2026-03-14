@@ -223,6 +223,24 @@ PROMPT_STOPWORDS = POST_THEME_STOPWORDS | {
     "самые",
 }
 
+CANONICAL_THEME_PATTERNS: list[tuple[str, str]] = [
+    (r"\bинтернет\b.*\bподмосков", "Ограничения интернета в Подмосковье"),
+    (r"\bподмосков[а-я]*\b.*\bинтернет", "Ограничения интернета в Подмосковье"),
+    (r"\bбел[а-я]*\s+списк", "Сайты из белого списка"),
+    (r"\bтелеграм\b.*\bзамедл", "Замедление Telegram"),
+    (r"\bтелеграм\b.*\bблокир", "Блокировки Telegram"),
+    (r"\bснег", "Уборка снега"),
+    (r"\bуборк[а-я]*\b.*\bснег", "Уборка снега"),
+    (r"\bблагоустрой", "Благоустройство дворов и общественных пространств"),
+    (r"\bдвор", "Благоустройство дворов"),
+    (r"\bтротуар", "Ремонт тротуаров"),
+    (r"\bфасад", "Ремонт фасадов"),
+    (r"\bплощадк", "Детские и общественные площадки"),
+    (r"\bпарковк", "Парковка и дворовые проезды"),
+    (r"\bдорог", "Дороги и дорожные работы"),
+    (r"\bсвяз[ьи]", "Проблемы связи"),
+]
+
 
 class SummaryGenerator:
     def __init__(self) -> None:
@@ -319,7 +337,11 @@ class SummaryGenerator:
             if (topic.get("name") or "").strip() not in GENERIC_TOPICS
         ][: self.settings.llm_summary_max_topics]
 
-        derived_post_themes = self._extract_post_theme_candidates(matched_posts + top_popular + top_unpopular)
+        derived_post_themes = self._extract_post_theme_candidates(
+            matched_posts + top_popular + top_unpopular,
+            prompt_text=prompt_text,
+            declared_theme=(report_json.get("meta", {}).get("post_theme") or "").strip() or None,
+        )
         prompt_mode = self._infer_prompt_mode(prompt_text)
 
         return {
@@ -476,16 +498,24 @@ class SummaryGenerator:
                 seen.append(token)
         return [self._titleize_phrase(token) for token in seen[:8]]
 
-    def _extract_post_theme_candidates(self, posts: list[dict]) -> list[str]:
+    def _extract_post_theme_candidates(
+        self,
+        posts: list[dict],
+        prompt_text: str | None = None,
+        declared_theme: str | None = None,
+    ) -> list[str]:
         if len(posts) < 2:
-            return []
+            return self._fallback_theme_candidates(posts, prompt_text, declared_theme)
 
         unigram_counter: Counter[str] = Counter()
         bigram_counter: Counter[str] = Counter()
         trigram_counter: Counter[str] = Counter()
+        corpus_parts: list[str] = []
 
         for post in posts:
             text = self._normalize_text(post.get("post_text") or "")
+            if text:
+                corpus_parts.append(text)
             for sentence in self._split_into_sentences(text):
                 tokens = [token for token in re.findall(r"[a-zа-я0-9-]{3,}", sentence) if not token.isdigit()]
                 filtered = [token for token in tokens if self._is_theme_token(token)]
@@ -544,7 +574,83 @@ class SummaryGenerator:
                 if len(themes) >= 8:
                     break
 
-        return themes[:8]
+        normalized = self._normalize_theme_candidates(
+            themes,
+            " ".join(corpus_parts),
+            prompt_text=prompt_text,
+            declared_theme=declared_theme,
+        )
+        return normalized[:8]
+
+    def _fallback_theme_candidates(
+        self,
+        posts: list[dict],
+        prompt_text: str | None = None,
+        declared_theme: str | None = None,
+    ) -> list[str]:
+        corpus = " ".join(self._normalize_text(post.get("post_text") or "") for post in posts)
+        normalized = self._normalize_theme_candidates([], corpus, prompt_text=prompt_text, declared_theme=declared_theme)
+        return normalized[:5]
+
+    def _normalize_theme_candidates(
+        self,
+        raw_themes: list[str],
+        corpus_text: str,
+        prompt_text: str | None = None,
+        declared_theme: str | None = None,
+    ) -> list[str]:
+        normalized: list[str] = []
+
+        for pattern, label in CANONICAL_THEME_PATTERNS:
+            if re.search(pattern, corpus_text) and label not in normalized:
+                normalized.append(label)
+
+        for theme in raw_themes:
+            cleaned = self._normalize_single_theme(theme)
+            if cleaned and cleaned not in normalized:
+                normalized.append(cleaned)
+
+        if declared_theme:
+            theme_label = self._normalize_single_theme(declared_theme)
+            if theme_label and theme_label not in normalized:
+                normalized.append(theme_label)
+
+        for focus in self._extract_prompt_focus_terms(prompt_text):
+            focus_label = self._normalize_single_theme(focus)
+            if focus_label and focus_label not in normalized:
+                normalized.append(focus_label)
+
+        return normalized
+
+    def _normalize_single_theme(self, theme: str) -> str | None:
+        text = self._normalize_text(theme)
+        if not text:
+            return None
+
+        for pattern, label in CANONICAL_THEME_PATTERNS:
+            if re.search(pattern, text):
+                return label
+
+        tokens = [
+            token
+            for token in re.findall(r"[a-zа-я0-9-]{4,}", text)
+            if self._is_theme_token(token)
+        ]
+        if not tokens:
+            return None
+
+        if len(tokens) >= 3:
+            tokens = tokens[:3]
+        if len(tokens) == 2 and all(self._looks_like_verb(token) for token in tokens):
+            return None
+
+        phrase = " ".join(tokens)
+        phrase = self._titleize_phrase(phrase)
+
+        weak_phrases = {"Интернет подмосковье тоже", "Подмосковье тоже", "Отключать работать", "Интернет подмосковье"}
+        if phrase in weak_phrases:
+            return None
+        return phrase
 
     def _split_into_sentences(self, text: str) -> list[str]:
         chunks = [chunk.strip() for chunk in re.split(r"[.!?…:\n\r]+", text) if chunk.strip()]
@@ -681,7 +787,8 @@ class SummaryGenerator:
             lead = top_discussed_posts[0]
             parts.append(
                 f"Самой обсуждаемой новостью в текущей выборке выглядит публикация «{lead['post_text']}»: "
-                f"она собрала {lead['comments_count']} релевантных комментариев и score {lead['score']}. "
+                f"она собрала {lead['comments_count']} комментариев, {lead['likes_count']} лайков, "
+                f"{lead['reposts_count']} репостов и score {lead['score']}. "
             )
 
         if derived_post_themes:
