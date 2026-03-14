@@ -52,6 +52,64 @@ POST_THEME_STOPWORDS = {
     "лишь",
     "если",
     "вот",
+    "было",
+    "были",
+    "был",
+    "была",
+    "года",
+    "год",
+    "лет",
+    "месяц",
+    "месяца",
+    "неделя",
+    "недели",
+    "день",
+    "дня",
+    "дней",
+    "час",
+    "часа",
+    "часов",
+    "россии",
+    "россия",
+    "москве",
+    "москва",
+    "области",
+    "область",
+    "района",
+    "район",
+    "края",
+    "край",
+    "новый",
+    "новая",
+    "новые",
+    "старый",
+    "старые",
+    "самый",
+    "самая",
+    "самые",
+    "свои",
+    "свой",
+    "своих",
+    "наш",
+    "наши",
+    "ваш",
+    "ваши",
+    "первый",
+    "первая",
+    "первые",
+    "второй",
+    "вторая",
+    "вторые",
+    "третий",
+    "третья",
+    "сказал",
+    "сказала",
+    "заявил",
+    "заявила",
+    "сообщил",
+    "сообщила",
+    "говорит",
+    "пишет",
     "все",
     "всего",
     "всем",
@@ -237,6 +295,9 @@ class SummaryGenerator:
         return contract
 
     def _extract_post_theme_candidates(self, posts: list[dict]) -> list[str]:
+        if len(posts) < 2:
+            return []
+
         unigram_counter: Counter[str] = Counter()
         bigram_counter: Counter[str] = Counter()
 
@@ -245,13 +306,22 @@ class SummaryGenerator:
             tokens = [token for token in re.findall(r"[a-zа-я0-9-]{3,}", text) if not token.isdigit()]
             filtered = [token for token in tokens if token not in POST_THEME_STOPWORDS]
 
-            for token in filtered:
+            unique_tokens = list(dict.fromkeys(filtered))
+            for token in unique_tokens:
                 unigram_counter[token] += 1
 
+            unique_bigrams = []
+            seen_bigrams: set[str] = set()
             for left, right in zip(filtered, filtered[1:]):
                 if left == right:
                     continue
-                bigram_counter[f"{left} {right}"] += 1
+                phrase = f"{left} {right}"
+                if phrase in seen_bigrams:
+                    continue
+                seen_bigrams.add(phrase)
+                unique_bigrams.append(phrase)
+            for phrase in unique_bigrams:
+                bigram_counter[phrase] += 1
 
         themes: list[str] = []
         for phrase, count in bigram_counter.most_common(12):
@@ -266,6 +336,8 @@ class SummaryGenerator:
         if len(themes) < 5:
             for token, count in unigram_counter.most_common(20):
                 if count < 2:
+                    continue
+                if len(token) < 4:
                     continue
                 title = self._titleize_phrase(token)
                 if title not in themes:
@@ -316,6 +388,7 @@ class SummaryGenerator:
         sentiment = report_json.get("sentiment", {})
         prompt = (prompt_text or "").strip() or "анализ реакции аудитории"
         request_contract = summary_payload["analysis_request"]["request_contract"]
+        declared_theme = (summary_payload["analysis_request"].get("theme_of_posts") or "").strip()
 
         posts = report_json.get("posts", {})
         matched_posts = (posts.get("matched", []) or [])[:8]
@@ -349,6 +422,8 @@ class SummaryGenerator:
         pieces: list[str] = [f"По запросу «{prompt}» картина по текущей выборке выглядит так. "]
         if post_topics:
             pieces.append(f"В самих новостях и постах заметнее всего темы: {self._join_list(post_topics[:4])}. ")
+        elif declared_theme:
+            pieces.append(f"Фокус выборки задан темой «{declared_theme}», но при текущем объеме постов устойчивые темы самих новостей автоматически выделяются слабо. ")
 
         normalized_prompt = self._normalize_text(prompt)
 
