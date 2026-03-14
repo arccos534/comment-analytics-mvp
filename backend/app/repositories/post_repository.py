@@ -49,6 +49,7 @@ class PostRepository:
                     post_text=normalized.post_text,
                     post_date=normalized.post_date,
                     likes_count=normalized.likes_count,
+                    reposts_count=normalized.reposts_count,
                     views_count=normalized.views_count,
                     comments_count=normalized.comments_count,
                     raw_payload=normalized.raw_payload,
@@ -59,6 +60,7 @@ class PostRepository:
                 post.post_text = normalized.post_text
                 post.post_date = normalized.post_date
                 post.likes_count = normalized.likes_count
+                post.reposts_count = normalized.reposts_count
                 post.views_count = normalized.views_count
                 post.comments_count = normalized.comments_count
                 post.raw_payload = normalized.raw_payload

@@ -27,6 +27,7 @@ class NormalizedPost:
     post_text: str | None
     post_date: datetime
     likes_count: int = 0
+    reposts_count: int = 0
     views_count: int = 0
     comments_count: int = 0
     raw_payload: dict | None = None

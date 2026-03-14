@@ -51,6 +51,9 @@ class ReportPostItem(BaseModel):
     post_text: str | None = None
     score: float
     comments_count: int
+    relevant_comments_count: int | None = None
+    likes_count: int | None = None
+    reposts_count: int | None = None
 
 
 class ReportSchema(BaseModel):

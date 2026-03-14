@@ -172,6 +172,7 @@ class TelegramProvider(BaseProvider):
                 post_text="Новый запуск продукта, обсуждение цены и качества сервиса.",
                 post_date=base_date + timedelta(days=3),
                 likes_count=0,
+                reposts_count=18,
                 views_count=3400,
                 comments_count=4,
                 raw_payload={"provider": "telegram", "demo": True, "entity_ref": slug},
@@ -182,6 +183,7 @@ class TelegramProvider(BaseProvider):
                 post_text="Обновление доставки, поддержки и скорости ответа команды.",
                 post_date=base_date + timedelta(days=7),
                 likes_count=0,
+                reposts_count=9,
                 views_count=2800,
                 comments_count=4,
                 raw_payload={"provider": "telegram", "demo": True, "entity_ref": slug},
@@ -227,6 +229,7 @@ class TelegramProvider(BaseProvider):
             post_text=getattr(message, "message", None),
             post_date=message.date,
             likes_count=0,
+            reposts_count=getattr(message, "forwards", None) or 0,
             views_count=views_count,
             comments_count=comments_count,
             raw_payload={

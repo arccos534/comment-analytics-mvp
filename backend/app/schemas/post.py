@@ -12,5 +12,6 @@ class PostResponse(ORMModel):
     post_text: str | None
     post_date: datetime
     likes_count: int
+    reposts_count: int
     views_count: int
     comments_count: int

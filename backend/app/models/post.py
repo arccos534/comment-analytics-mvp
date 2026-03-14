@@ -21,6 +21,7 @@ class Post(UUIDMixin, TimestampMixin, Base):
     post_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     post_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     likes_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    reposts_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     views_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     comments_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     raw_payload: Mapped[dict | None] = mapped_column(JSONB, nullable=True)

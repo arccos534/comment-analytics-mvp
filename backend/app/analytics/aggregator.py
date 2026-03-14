@@ -15,8 +15,10 @@ class ReportAggregator:
                 "post_id": None,
                 "post_url": "",
                 "post_text": None,
-                "comments_count": 0,
+                "relevant_comments_count": 0,
+                "platform_comments_count": 0,
                 "likes_count": 0,
+                "reposts_count": 0,
                 "views_count": 0,
             }
         )
@@ -27,8 +29,10 @@ class ReportAggregator:
             bucket["post_id"] = str(post.id)
             bucket["post_url"] = post.post_url
             bucket["post_text"] = post.post_text
-            bucket["comments_count"] += 1
+            bucket["relevant_comments_count"] += 1
+            bucket["platform_comments_count"] = max(bucket["platform_comments_count"], getattr(post, "comments_count", 0))
             bucket["likes_count"] = getattr(post, "likes_count", 0)
+            bucket["reposts_count"] = getattr(post, "reposts_count", 0)
             bucket["views_count"] = getattr(post, "views_count", 0)
 
         total_comments = len(working_set)
@@ -66,10 +70,10 @@ class ReportAggregator:
         }
 
         def popularity_score(value: dict) -> float:
-            comments_score = value["comments_count"] * 3
-            likes_score = value["likes_count"]
-            views_score = min(value["views_count"] / 100, 50)
-            return round(comments_score + likes_score + views_score, 2)
+            comments_score = value["platform_comments_count"] * 5
+            likes_score = value["likes_count"] * 2
+            reposts_score = value["reposts_count"] * 4
+            return round(comments_score + likes_score + reposts_score, 2)
 
         post_items = [
             {
@@ -77,18 +81,28 @@ class ReportAggregator:
                 "post_url": value["post_url"],
                 "post_text": value["post_text"],
                 "score": popularity_score(value),
-                "comments_count": value["comments_count"],
+                "comments_count": value["platform_comments_count"],
+                "relevant_comments_count": value["relevant_comments_count"],
+                "likes_count": value["likes_count"],
+                "reposts_count": value["reposts_count"],
             }
             for value in post_scores.values()
         ]
 
         matched_posts = sorted(
             post_items,
-            key=lambda item: (item["comments_count"], item["score"]),
+            key=lambda item: (item["relevant_comments_count"], item["comments_count"], item["score"]),
             reverse=True,
         )
-        popular_posts = sorted(post_items, key=lambda item: (item["score"], item["comments_count"]), reverse=True)[:5]
-        unpopular_posts = sorted(post_items, key=lambda item: (item["score"], item["comments_count"]))[:5]
+        popular_posts = sorted(
+            post_items,
+            key=lambda item: (item["score"], item["comments_count"], item["likes_count"], item["reposts_count"]),
+            reverse=True,
+        )[:5]
+        unpopular_posts = sorted(
+            post_items,
+            key=lambda item: (item["score"], item["comments_count"], item["likes_count"], item["reposts_count"]),
+        )[:5]
 
         report = {
             "meta": {
