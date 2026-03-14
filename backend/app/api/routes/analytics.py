@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db
@@ -36,6 +36,14 @@ def get_report(analysis_run_id: UUID, db: Session = Depends(get_db)) -> ReportSn
     if not report:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Report not found")
     return report
+
+
+@router.delete("/analysis-runs/{analysis_run_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_report(analysis_run_id: UUID, db: Session = Depends(get_db)) -> Response:
+    deleted = AnalyticsService(db).delete_report(analysis_run_id)
+    if not deleted:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Analysis run not found")
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get("/reports-tree", response_model=list[ProjectReportsTreeItem])

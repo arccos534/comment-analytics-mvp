@@ -42,7 +42,7 @@ class Settings(BaseSettings):
     openai_compatible_model: str = "gpt-4o-mini"
     llm_summary_enabled: bool = False
     llm_summary_cache_ttl_seconds: int = 86400
-    llm_summary_min_comments: int = 20
+    llm_summary_min_comments: int = 8
     llm_summary_max_topics: int = 5
     llm_summary_max_examples_per_bucket: int = 1
 

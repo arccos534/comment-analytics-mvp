@@ -52,6 +52,7 @@ export const api = {
       body: JSON.stringify(payload)
     }),
   listReportsTree: () => apiFetch<ProjectReportsTreeItem[]>("/reports-tree"),
+  deleteReport: (analysisRunId: string) => apiFetch<void>(`/analysis-runs/${analysisRunId}`, { method: "DELETE" }),
   getAnalysisRun: (analysisRunId: string) => apiFetch<AnalysisRun>(`/analysis-runs/${analysisRunId}`),
   getReport: (analysisRunId: string) => apiFetch<ReportSnapshot>(`/analysis-runs/${analysisRunId}/report`)
 };

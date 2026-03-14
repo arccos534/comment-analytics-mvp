@@ -24,6 +24,14 @@ class AnalysisRepository:
     def get_run(self, analysis_run_id: UUID) -> AnalysisRun | None:
         return self.db.get(AnalysisRun, analysis_run_id)
 
+    def delete_run(self, analysis_run_id: UUID) -> bool:
+        run = self.get_run(analysis_run_id)
+        if not run:
+            return False
+        self.db.delete(run)
+        self.db.commit()
+        return True
+
     def update_run_status(
         self,
         analysis_run_id: UUID,

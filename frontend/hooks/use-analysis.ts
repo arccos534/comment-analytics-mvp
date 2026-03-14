@@ -44,3 +44,15 @@ export function useReportsTree() {
     refetchInterval: 30_000
   });
 }
+
+export function useDeleteReport() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: api.deleteReport,
+    onSuccess: (_data, analysisRunId) => {
+      queryClient.invalidateQueries({ queryKey: ["reports-tree"] });
+      queryClient.removeQueries({ queryKey: ["report", analysisRunId] });
+      queryClient.removeQueries({ queryKey: ["analysis-run", analysisRunId] });
+    }
+  });
+}

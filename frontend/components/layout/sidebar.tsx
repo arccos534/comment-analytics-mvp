@@ -1,18 +1,20 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
-import { usePathname } from "next/navigation";
-import { ChevronDown, ChevronRight, Database, FileText } from "lucide-react";
+import { type MouseEvent, useMemo, useState } from "react";
+import { usePathname, useRouter } from "next/navigation";
+import { ChevronDown, ChevronRight, Database, FileText, Trash2 } from "lucide-react";
 
-import { useReportsTree } from "@/hooks/use-analysis";
+import { useDeleteReport, useReportsTree } from "@/hooks/use-analysis";
 import { useProjects } from "@/hooks/use-projects";
 import { cn, formatReportGroupDate } from "@/lib/utils";
 
 export function Sidebar() {
   const pathname = usePathname();
+  const router = useRouter();
   const projectsQuery = useProjects();
   const reportsTreeQuery = useReportsTree();
+  const deleteReport = useDeleteReport();
   const [openReports, setOpenReports] = useState(pathname.includes("/reports/"));
   const [openProjects, setOpenProjects] = useState<Record<string, boolean>>({});
 
@@ -23,6 +25,31 @@ export function Sidebar() {
 
   const toggleProject = (projectId: string) => {
     setOpenProjects((current) => ({ ...current, [projectId]: !current[projectId] }));
+  };
+
+  const handleDeleteReport = async (
+    event: MouseEvent<HTMLButtonElement>,
+    projectId: string,
+    analysisRunId: string,
+    title: string
+  ) => {
+    event.preventDefault();
+    event.stopPropagation();
+
+    const confirmed = window.confirm(`Delete report "${title}"?`);
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      await deleteReport.mutateAsync(analysisRunId);
+      if (pathname === `/projects/${projectId}/reports/${analysisRunId}`) {
+        router.push(`/projects/${projectId}/analytics`);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to delete report";
+      window.alert(message);
+    }
   };
 
   return (
@@ -118,18 +145,33 @@ export function Sidebar() {
                                   {grouped.map((report) => {
                                     const isActive = pathname === `/projects/${project.id}/reports/${report.analysis_run_id}`;
                                     return (
-                                      <Link
+                                      <div
                                         key={report.analysis_run_id}
-                                        href={`/projects/${project.id}/reports/${report.analysis_run_id}`}
                                         className={cn(
-                                          "block rounded-xl px-3 py-2 text-sm transition",
+                                          "group flex items-start gap-2 rounded-xl px-3 py-2 text-sm transition",
                                           isActive
                                             ? "bg-cyan-400/[0.10] text-cyan-50 ring-1 ring-cyan-300/20"
                                             : "text-muted-foreground hover:bg-white/[0.05] hover:text-foreground"
                                         )}
                                       >
-                                        <div className="line-clamp-2">{report.title}</div>
-                                      </Link>
+                                        <Link
+                                          href={`/projects/${project.id}/reports/${report.analysis_run_id}`}
+                                          className="min-w-0 flex-1"
+                                        >
+                                          <div className="line-clamp-2">{report.title}</div>
+                                        </Link>
+                                        <button
+                                          type="button"
+                                          aria-label={`Delete report ${report.title}`}
+                                          onClick={(event) =>
+                                            handleDeleteReport(event, project.id, report.analysis_run_id, report.title)
+                                          }
+                                          className="mt-0.5 rounded-md p-1 text-rose-300/80 opacity-0 transition hover:bg-rose-500/10 hover:text-rose-200 group-hover:opacity-100"
+                                          disabled={deleteReport.isPending}
+                                        >
+                                          <Trash2 className="h-3.5 w-3.5" />
+                                        </button>
+                                      </div>
                                     );
                                   })}
                                 </div>

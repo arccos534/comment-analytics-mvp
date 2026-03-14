@@ -125,6 +125,9 @@ class AnalyticsService:
     def get_report(self, analysis_run_id: UUID):
         return self.analysis_repo.get_report(analysis_run_id)
 
+    def delete_report(self, analysis_run_id: UUID) -> bool:
+        return self.analysis_repo.delete_run(analysis_run_id)
+
     def list_reports_tree(self) -> list[dict]:
         grouped: dict[UUID, dict] = {}
         for project, run, _snapshot in self.analysis_repo.list_reports_tree():

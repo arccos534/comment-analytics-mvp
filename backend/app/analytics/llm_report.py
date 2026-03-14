@@ -52,6 +52,21 @@ POST_THEME_STOPWORDS = {
     "лишь",
     "если",
     "вот",
+    "все",
+    "всего",
+    "всем",
+    "всех",
+    "или",
+    "для",
+    "при",
+    "под",
+    "над",
+    "про",
+    "как",
+    "что",
+    "чтобы",
+    "где",
+    "когда",
     "было",
     "были",
     "был",
@@ -69,16 +84,14 @@ POST_THEME_STOPWORDS = {
     "час",
     "часа",
     "часов",
-    "россии",
-    "россия",
-    "москве",
-    "москва",
-    "области",
-    "область",
-    "района",
-    "район",
-    "края",
-    "край",
+    "первый",
+    "первая",
+    "первые",
+    "второй",
+    "вторая",
+    "вторые",
+    "третий",
+    "третья",
     "новый",
     "новая",
     "новые",
@@ -94,14 +107,6 @@ POST_THEME_STOPWORDS = {
     "наши",
     "ваш",
     "ваши",
-    "первый",
-    "первая",
-    "первые",
-    "второй",
-    "вторая",
-    "вторые",
-    "третий",
-    "третья",
     "сказал",
     "сказала",
     "заявил",
@@ -110,21 +115,16 @@ POST_THEME_STOPWORDS = {
     "сообщила",
     "говорит",
     "пишет",
-    "все",
-    "всего",
-    "всем",
-    "всех",
-    "или",
-    "для",
-    "при",
-    "под",
-    "над",
-    "про",
-    "как",
-    "что",
-    "чтобы",
-    "где",
-    "когда",
+    "россия",
+    "россии",
+    "москва",
+    "москве",
+    "область",
+    "области",
+    "район",
+    "района",
+    "край",
+    "края",
     "новость",
     "новости",
     "пост",
@@ -167,14 +167,13 @@ class SummaryGenerator:
 
     def generate_summary_text(self, report_json: dict, prompt_text: str | None = None) -> str:
         analyzed_comments = int(report_json.get("stats", {}).get("analyzed_comments", 0) or 0)
+        summary_payload = self._build_summary_payload(report_json, prompt_text)
         llm_enabled = (
             self.settings.llm_summary_enabled
             and self.settings.openai_compatible_base_url
             and self.settings.openai_compatible_api_key
             and analyzed_comments >= self.settings.llm_summary_min_comments
         )
-
-        summary_payload = self._build_summary_payload(report_json, prompt_text)
 
         if llm_enabled:
             try:
@@ -190,22 +189,22 @@ class SummaryGenerator:
                 completion = client.chat.completions.create(
                     model=self.settings.openai_compatible_model,
                     temperature=0,
-                    max_tokens=360,
+                    max_completion_tokens=360,
                     messages=[
                         {
                             "role": "system",
                             "content": (
-                                "Ты готовишь прикладную аналитическую записку по реакции аудитории на новости и посты. "
-                                "Твоя задача — максимально точно удовлетворить пользовательский prompt и тему анализа. "
-                                "Сначала определи, что именно просит пользователь, используя поля user_prompt и request_contract. "
-                                "Затем построй ответ так, чтобы закрыть все запрошенные аналитические вопросы. "
-                                "Главный источник смысла — темы самих новостей и постов: post_theme_candidates, matched_posts, "
-                                "top_popular_posts и top_unpopular_posts. Темы комментариев используй только как вспомогательный слой. "
-                                "Нельзя подменять конкретные темы generic-формулировками вроде 'Общее обсуждение'. "
-                                "Нельзя ограничиваться перечислением процентов без объяснения, какие темы стоят за этими цифрами. "
-                                "Если данных мало, это нужно сказать прямо, но все равно дать максимально конкретный предварительный вывод. "
-                                "Пиши по-русски, предметно, кратко, с нормальной аналитической структурой. Подзаголовки допустимы только если реально помогают ответить на запрос. "
-                                "Текст должен выглядеть как финальный аналитический вывод для заказчика, а не как техническая заметка."
+                                "Ты готовишь финальную аналитическую записку по реакции аудитории на новости и посты. "
+                                "Твоя задача — максимально точно ответить на пользовательский запрос, а не пересказывать поля отчета. "
+                                "Сначала определи, что именно требуется по полям user_prompt и request_contract. "
+                                "Затем дай конкретный аналитический вывод по этим пунктам, используя прежде всего темы самих постов и новостей, "
+                                "а комментарии — как подтверждающий слой. "
+                                "Используй только темы, которые реально подтверждаются полями derived_post_themes, matched_posts, top_popular_posts и top_unpopular_posts. "
+                                "Не подменяй конкретные темы словами вроде 'Общее обсуждение'. "
+                                "Не ограничивайся процентами без объяснения, какие темы и сюжеты стоят за цифрами. "
+                                "Если данных мало, прямо скажи об ограничениях, но все равно дай максимально конкретный предварительный вывод. "
+                                "Пиши по-русски, предметно, без воды. Верни один связный, хорошо структурированный аналитический текст, подходящий для заказчика. "
+                                "Подзаголовки допустимы только если они реально улучшают ответ."
                             ),
                         },
                         {
@@ -235,7 +234,7 @@ class SummaryGenerator:
         matched_posts = (posts.get("matched", []) or [])[:8]
         top_popular = (posts.get("top_popular", []) or [])[:5]
         top_unpopular = (posts.get("top_unpopular", []) or [])[:5]
-        max_examples = self.settings.llm_summary_max_examples_per_bucket
+        max_examples = max(self.settings.llm_summary_max_examples_per_bucket, 2)
 
         meaningful_topics = [
             topic
@@ -243,9 +242,11 @@ class SummaryGenerator:
             if (topic.get("name") or "").strip() not in GENERIC_TOPICS
         ][: self.settings.llm_summary_max_topics]
 
+        derived_post_themes = self._extract_post_theme_candidates(matched_posts + top_popular + top_unpopular)
+
         return {
             "analysis_request": {
-                "theme_of_posts": report_json.get("meta", {}).get("post_theme"),
+                "theme_of_posts": (report_json.get("meta", {}).get("post_theme") or "").strip() or None,
                 "keywords_for_posts": report_json.get("meta", {}).get("post_keywords", []),
                 "user_prompt": (prompt_text or "").strip(),
                 "request_contract": self._infer_request_contract(prompt_text),
@@ -255,14 +256,20 @@ class SummaryGenerator:
             },
             "coverage": report_json.get("stats", {}),
             "sentiment_distribution": report_json.get("sentiment", {}),
-            "meaningful_comment_topics": meaningful_topics,
-            "post_theme_candidates": self._extract_post_theme_candidates(matched_posts + top_popular + top_unpopular),
-            "liked_patterns": report_json.get("insights", {}).get("liked_patterns", []),
-            "disliked_patterns": report_json.get("insights", {}).get("disliked_patterns", []),
-            "comment_examples": {
-                "positive": (examples.get("positive_comments", []) or [])[:max_examples],
-                "negative": (examples.get("negative_comments", []) or [])[:max_examples],
-                "neutral": (examples.get("neutral_comments", []) or [])[:max_examples],
+            "derived_post_themes": derived_post_themes,
+            "comment_topics": meaningful_topics,
+            "positive_signals": {
+                "patterns": report_json.get("insights", {}).get("liked_patterns", []),
+                "topics": self._extract_comment_signal_topics(report_json, "positive"),
+                "examples": (examples.get("positive_comments", []) or [])[:max_examples],
+            },
+            "negative_signals": {
+                "patterns": report_json.get("insights", {}).get("disliked_patterns", []),
+                "topics": self._extract_comment_signal_topics(report_json, "negative"),
+                "examples": (examples.get("negative_comments", []) or [])[:max_examples],
+            },
+            "neutral_signals": {
+                "examples": (examples.get("neutral_comments", []) or [])[:max_examples],
             },
             "matched_posts": [self._compact_post(post) for post in matched_posts],
             "top_popular_posts": [self._compact_post(post) for post in top_popular],
@@ -272,16 +279,16 @@ class SummaryGenerator:
     def _infer_request_contract(self, prompt_text: str | None) -> list[str]:
         prompt = self._normalize_text(prompt_text or "")
         if not prompt:
-            return ["Дать общий, но конкретный аналитический вывод по реакции аудитории на выбранные посты."]
+            return ["Дай конкретный аналитический вывод по реакции аудитории на выбранные посты."]
 
         contract: list[str] = []
         patterns = [
             (r"интерес|интересуют|интересны|вовлеч", "Определи, какие новости и темы вызывают наибольший интерес аудитории."),
-            (r"негатив|негативн|негативные эмоц|раздраж|крити|возмущ", "Определи, какие новости и темы вызывают негативные эмоции аудитории."),
+            (r"негатив|негативн|эмоц|раздраж|крити|возмущ", "Определи, какие новости и темы вызывают негативные эмоции аудитории."),
             (r"позитив|нравит|положит", "Определи, к каким темам аудитория относится скорее позитивно."),
             (r"не нрав|отрицат|претенз|жалоб|проблем", "Определи, к каким темам аудитория относится скорее негативно."),
-            (r"тем|сюжет|новост", "Выдели конкретные темы самих новостей и постов, которые реально видны в выборке."),
-            (r"сравн|разниц|отлич", "Сравни основные типы реакции между выделенными темами."),
+            (r"тем|сюжет|новост", "Выдели конкретные темы самих новостей и постов, реально видимые в выборке."),
+            (r"сравн|разниц|отлич", "Сравни реакции аудитории между основными темами."),
             (r"почему|причин", "Объясни, почему аудитория реагирует именно так, опираясь на комментарии и примеры постов."),
         ]
 
@@ -290,7 +297,7 @@ class SummaryGenerator:
                 contract.append(instruction)
 
         if not contract:
-            contract.append("Дай конкретный аналитический ответ по запросу пользователя, опираясь на темы постов и реакцию аудитории.")
+            contract.append("Дай конкретный аналитический ответ на запрос пользователя, опираясь на темы постов и реакцию аудитории.")
 
         return contract
 
@@ -310,7 +317,6 @@ class SummaryGenerator:
             for token in unique_tokens:
                 unigram_counter[token] += 1
 
-            unique_bigrams = []
             seen_bigrams: set[str] = set()
             for left, right in zip(filtered, filtered[1:]):
                 if left == right:
@@ -319,25 +325,23 @@ class SummaryGenerator:
                 if phrase in seen_bigrams:
                     continue
                 seen_bigrams.add(phrase)
-                unique_bigrams.append(phrase)
-            for phrase in unique_bigrams:
                 bigram_counter[phrase] += 1
 
         themes: list[str] = []
-        for phrase, count in bigram_counter.most_common(12):
+        for phrase, count in bigram_counter.most_common(16):
             if count < 2:
                 continue
             if any(part in POST_THEME_STOPWORDS for part in phrase.split()):
                 continue
-            themes.append(self._titleize_phrase(phrase))
+            title = self._titleize_phrase(phrase)
+            if title not in themes:
+                themes.append(title)
             if len(themes) >= 5:
                 break
 
         if len(themes) < 5:
-            for token, count in unigram_counter.most_common(20):
-                if count < 2:
-                    continue
-                if len(token) < 4:
+            for token, count in unigram_counter.most_common(24):
+                if count < 2 or len(token) < 4:
                     continue
                 title = self._titleize_phrase(token)
                 if title not in themes:
@@ -347,21 +351,23 @@ class SummaryGenerator:
 
         return themes[:8]
 
-    def _extract_meaningful_comment_topics(self, report_json: dict, sentiment_bucket: str | None = None) -> list[str]:
-        examples_map = report_json.get("examples", {})
+    def _extract_comment_signal_topics(self, report_json: dict, bucket: str) -> list[str]:
         example_key = {
             "positive": "positive_comments",
             "negative": "negative_comments",
             "neutral": "neutral_comments",
-        }.get(sentiment_bucket or "", "")
+        }.get(bucket, "")
 
         counter: Counter[str] = Counter()
-        if example_key:
-            for example in (examples_map.get(example_key, []) or []):
-                text = self._normalize_text(example.get("text") or "")
-                tokens = [token for token in re.findall(r"[a-zа-я0-9-]{4,}", text) if token not in POST_THEME_STOPWORDS]
-                for token in tokens:
-                    counter[token] += 1
+        for example in (report_json.get("examples", {}).get(example_key, []) or []):
+            text = self._normalize_text(example.get("text") or "")
+            tokens = [
+                token
+                for token in re.findall(r"[a-zа-я0-9-]{4,}", text)
+                if token not in POST_THEME_STOPWORDS
+            ]
+            for token in set(tokens):
+                counter[token] += 1
 
         extracted = [self._titleize_phrase(token) for token, _ in counter.most_common(8)]
         fallback = [
@@ -383,28 +389,19 @@ class SummaryGenerator:
             "comments_count": post.get("comments_count", 0),
         }
 
-    def _build_fallback_summary(self, report_json: dict, prompt_text: str | None, summary_payload: dict) -> str:
+    def _build_fallback_summary(self, report_json: dict, prompt_text: str | None, payload: dict) -> str:
         stats = report_json.get("stats", {})
         sentiment = report_json.get("sentiment", {})
-        prompt = (prompt_text or "").strip() or "анализ реакции аудитории"
-        request_contract = summary_payload["analysis_request"]["request_contract"]
-        declared_theme = (summary_payload["analysis_request"].get("theme_of_posts") or "").strip()
-
-        posts = report_json.get("posts", {})
-        matched_posts = (posts.get("matched", []) or [])[:8]
-        popular_posts = (posts.get("top_popular", []) or [])[:5]
-        unpopular_posts = (posts.get("top_unpopular", []) or [])[:5]
-
-        post_topics = self._extract_post_theme_candidates(matched_posts)
-        interest_topics = self._extract_post_theme_candidates(popular_posts) or post_topics
-        low_engagement_topics = self._extract_post_theme_candidates(unpopular_posts)
-        positive_topics = self._extract_meaningful_comment_topics(report_json, "positive")
-        negative_topics = self._extract_meaningful_comment_topics(report_json, "negative")
-        liked_patterns = report_json.get("insights", {}).get("liked_patterns", []) or []
-        disliked_patterns = report_json.get("insights", {}).get("disliked_patterns", []) or []
+        request = payload["analysis_request"]
+        prompt = request["user_prompt"] or "анализ реакции аудитории"
+        contract = request["request_contract"]
+        declared_theme = request.get("theme_of_posts")
 
         total_posts = int(stats.get("total_posts", 0) or 0)
         analyzed_comments = int(stats.get("analyzed_comments", 0) or 0)
+        derived_post_themes = payload["derived_post_themes"]
+        positive_topics = payload["positive_signals"]["topics"] or payload["positive_signals"]["patterns"]
+        negative_topics = payload["negative_signals"]["topics"] or payload["negative_signals"]["patterns"]
 
         if analyzed_comments <= 0:
             return (
@@ -412,56 +409,68 @@ class SummaryGenerator:
                 "По текущей выборке нельзя сделать содержательный вывод о реакции аудитории."
             )
 
-        scarcity_note = ""
-        if analyzed_comments < 10 or total_posts < 2:
-            scarcity_note = (
-                f"Данных мало: в анализ попали {total_posts} постов и {analyzed_comments} релевантных комментариев, "
-                "поэтому вывод нужно считать предварительным. "
-            )
+        parts: list[str] = [f"По запросу «{prompt}» картина по текущей выборке выглядит так. "]
 
-        pieces: list[str] = [f"По запросу «{prompt}» картина по текущей выборке выглядит так. "]
-        if post_topics:
-            pieces.append(f"В самих новостях и постах заметнее всего темы: {self._join_list(post_topics[:4])}. ")
+        if derived_post_themes:
+            parts.append(f"На уровне самих новостей и постов наиболее заметны темы {self._join_list(derived_post_themes[:4])}. ")
         elif declared_theme:
-            pieces.append(f"Фокус выборки задан темой «{declared_theme}», но при текущем объеме постов устойчивые темы самих новостей автоматически выделяются слабо. ")
+            parts.append(f"Фокус выборки задан темой «{declared_theme}», но при текущем объеме постов устойчивые подтемы автоматически выделяются слабо. ")
 
         normalized_prompt = self._normalize_text(prompt)
-
-        if any("интерес" in item.lower() for item in request_contract) or re.search(r"интерес|вовлеч", normalized_prompt):
-            if interest_topics:
-                pieces.append(f"Наибольший интерес аудитории вызывают новости и посты на темы {self._join_list(interest_topics[:4])}. ")
+        if self._request_mentions_interest(contract, normalized_prompt):
+            if derived_post_themes:
+                parts.append(f"Наибольший интерес аудитории по текущей выборке чаще связан с темами {self._join_list(derived_post_themes[:3])}. ")
             else:
-                pieces.append("Выраженные темы, которые стабильно вызывают наибольший интерес аудитории, по текущей выборке не выделяются достаточно уверенно. ")
+                parts.append("Темы, стабильно вызывающие наибольший интерес аудитории, по текущей выборке выделяются неуверенно. ")
 
-        if any("негативные эмоции" in item.lower() for item in request_contract) or re.search(r"негатив|эмоц|раздраж|крити", normalized_prompt):
-            negative_emotions = negative_topics[:4] or disliked_patterns[:4] or low_engagement_topics[:4]
-            if negative_emotions:
-                pieces.append(f"Негативные эмоции чаще всего вызывают темы {self._join_list(negative_emotions)}. ")
+        if self._request_mentions_negative_emotions(contract, normalized_prompt):
+            if negative_topics:
+                parts.append(f"Негативные эмоции заметнее всего связаны с темами {self._join_list(negative_topics[:3])}. ")
             else:
-                pieces.append("Явно выраженные темы, стабильно вызывающие негативные эмоции, по текущей выборке не выделяются. ")
+                parts.append("Устойчивые темы, явно вызывающие негативные эмоции, по текущей выборке не выделяются. ")
 
-        if any("позитивно" in item.lower() for item in request_contract) or re.search(r"позитив|нравит|положит", normalized_prompt):
-            positive_basis = positive_topics[:4] or liked_patterns[:4] or interest_topics[:4]
-            if positive_basis:
-                pieces.append(f"Скорее позитивно аудитория относится к темам {self._join_list(positive_basis)}. ")
+        if self._request_mentions_positive_attitude(contract, normalized_prompt):
+            if positive_topics:
+                parts.append(f"Скорее позитивно аудитория относится к темам {self._join_list(positive_topics[:3])}. ")
             else:
-                pieces.append("Стабильные темы с выраженно позитивной реакцией аудитории по текущей выборке видны слабо. ")
+                parts.append("Стабильные темы с выраженно позитивной реакцией аудитории по текущей выборке видны слабо. ")
 
-        if any("негативно" in item.lower() for item in request_contract) or re.search(r"не нрав|отрицат|претенз|жалоб|проблем", normalized_prompt):
-            negative_basis = negative_topics[:4] or disliked_patterns[:4]
-            if negative_basis:
-                pieces.append(f"Скорее негативно аудитория относится к темам {self._join_list(negative_basis)}. ")
+        if self._request_mentions_negative_attitude(contract, normalized_prompt):
+            if negative_topics:
+                parts.append(f"Скорее негативно аудитория относится к темам {self._join_list(negative_topics[:3])}. ")
             else:
-                pieces.append("Устойчивой группы тем с явно отрицательным отношением аудитории по текущей выборке не видно. ")
+                parts.append("Устойчивой группы тем с явно отрицательным отношением аудитории по текущей выборке не видно. ")
 
-        pieces.append(
+        parts.append(
             f"Распределение тональности по релевантным комментариям: позитив {sentiment.get('positive_percent', 0)}%, "
             f"негатив {sentiment.get('negative_percent', 0)}%, нейтрально {sentiment.get('neutral_percent', 0)}%. "
         )
-        if scarcity_note:
-            pieces.append(scarcity_note)
 
-        return "".join(pieces).strip()
+        if analyzed_comments < 10 or total_posts < 2:
+            parts.append(
+                f"Данных мало: в анализ попали {total_posts} постов и {analyzed_comments} релевантных комментариев, "
+                "поэтому вывод нужно считать предварительным."
+            )
+
+        return "".join(parts).strip()
+
+    def _request_mentions_interest(self, contract: list[str], prompt: str) -> bool:
+        return any("интерес" in item.lower() for item in contract) or bool(re.search(r"интерес|вовлеч", prompt))
+
+    def _request_mentions_negative_emotions(self, contract: list[str], prompt: str) -> bool:
+        return any("негативные эмоции" in item.lower() for item in contract) or bool(
+            re.search(r"негатив|эмоц|раздраж|крити|возмущ", prompt)
+        )
+
+    def _request_mentions_positive_attitude(self, contract: list[str], prompt: str) -> bool:
+        return any("позитивно" in item.lower() for item in contract) or bool(
+            re.search(r"позитив|нравит|положит", prompt)
+        )
+
+    def _request_mentions_negative_attitude(self, contract: list[str], prompt: str) -> bool:
+        return any("негативно" in item.lower() for item in contract) or bool(
+            re.search(r"не нрав|отрицат|претенз|жалоб|проблем", prompt)
+        )
 
     def _join_list(self, items: list[str]) -> str:
         cleaned = [item for item in items if item]
