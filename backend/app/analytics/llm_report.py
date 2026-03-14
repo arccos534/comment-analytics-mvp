@@ -154,6 +154,40 @@ POST_THEME_STOPWORDS = {
     "житель",
 }
 
+PROMPT_STOPWORDS = POST_THEME_STOPWORDS | {
+    "проанализируй",
+    "проанализировать",
+    "анализ",
+    "какой",
+    "какая",
+    "какие",
+    "какого",
+    "каких",
+    "какому",
+    "каким",
+    "найди",
+    "найти",
+    "покажи",
+    "показать",
+    "определи",
+    "определи",
+    "выдели",
+    "выяви",
+    "расскажи",
+    "объясни",
+    "сделай",
+    "нужно",
+    "надо",
+    "хочу",
+    "над",
+    "ли",
+    "наиболее",
+    "самой",
+    "самая",
+    "самый",
+    "самые",
+}
+
 
 class SummaryGenerator:
     def __init__(self) -> None:
@@ -206,17 +240,21 @@ class SummaryGenerator:
         return (
             "Ты готовишь итоговую аналитическую сводку по реакции аудитории на новости и посты. "
             "Твоя задача — максимально точно ответить на пользовательский запрос, а не пересказать поля отчета. "
-            "Сначала определи, чего именно требует запрос пользователя. Затем дай конкретный ответ именно на этот запрос. "
+            "Сначала определи, чего именно требует запрос пользователя, используя поля user_prompt, prompt_mode, request_contract, answer_strategy и prompt_focus_terms. "
+            "Сформируй внутренний план ответа, но не показывай его. Затем дай конкретный ответ именно на этот запрос. "
             "Опирайся прежде всего на сами посты и новости, а комментарии используй как слой подтверждения: "
             "интерес, негатив, одобрение, претензии, тональность и характер реакции. "
             "Если пользователь спрашивает о самой обсуждаемой новости, назови ее прямо и объясни, почему она самая обсуждаемая "
             "(число релевантных комментариев, вовлеченность, характер реакции). "
+            "Если answer_strategy указывает на один конкретный объект или один главный вывод, начни текст именно с него. "
+            "Если answer_strategy указывает на сравнение или ранжирование, строй ответ вокруг сравнения или ранжирования, а не вокруг общей статистики. "
             "Если пользователь спрашивает о темах, выделяй только темы, которые реально подтверждаются несколькими постами или ключевыми постами выборки. "
             "Не используй мусорные формулировки вроде 'Общее обсуждение', если они не помогают ответить на вопрос. "
             "Не придумывай темы из одиночных слов без смысловой опоры. "
             "Ответ должен быть четким, структурированным и полезным для заказчика. "
             "Подзаголовки допустимы, но только если они делают ответ понятнее. "
             "Избегай воды, общих фраз и простого пересказа процентов без выводов. "
+            "Не ограничивайся перечислением процентов. Всегда объясняй, какие именно новости, темы или сюжеты стоят за выводом. "
             "Если данных мало, прямо обозначь ограничение, но все равно ответь максимально предметно."
         )
 
@@ -255,6 +293,8 @@ class SummaryGenerator:
                 "user_prompt": (prompt_text or "").strip(),
                 "prompt_mode": prompt_mode,
                 "request_contract": self._infer_request_contract(prompt_text),
+                "answer_strategy": self._build_answer_strategy(prompt_text),
+                "prompt_focus_terms": self._extract_prompt_focus_terms(prompt_text),
                 "period_from": report_json.get("meta", {}).get("period_from"),
                 "period_to": report_json.get("meta", {}).get("period_to"),
                 "platforms": report_json.get("meta", {}).get("platforms", []),
@@ -340,6 +380,65 @@ class SummaryGenerator:
                 "Дай конкретный аналитический ответ на запрос пользователя, опираясь на темы постов и реакцию аудитории."
             )
         return instructions
+
+    def _build_answer_strategy(self, prompt_text: str | None) -> dict:
+        prompt = self._normalize_text(prompt_text or "")
+        response_shape = "analysis_note"
+        first_sentence_rule = "Начни с прямого ответа на пользовательский запрос."
+        must_cover: list[str] = []
+
+        if re.search(r"сам[а-я]* обсужда|наиболее обсужда", prompt):
+            response_shape = "single_lead_item"
+            first_sentence_rule = "Начни с самой обсуждаемой новости или поста и назови ее прямо в первом предложении."
+            must_cover.extend(
+                [
+                    "Назови конкретную новость или пост-лидер.",
+                    "Объясни, почему именно этот сюжет стал самым обсуждаемым.",
+                ]
+            )
+        elif re.search(r"топ|рейтинг|какие новости|какие темы", prompt):
+            response_shape = "ranked_or_grouped_answer"
+            first_sentence_rule = "Сразу назови ключевые темы или лидирующие новости, без вступительной воды."
+            must_cover.append("Сгруппируй или ранжируй ключевые темы и новости по смыслу запроса.")
+
+        if re.search(r"сравн|разниц|отлич", prompt):
+            response_shape = "comparison"
+            first_sentence_rule = "Сначала назови главную разницу между объектами сравнения."
+            must_cover.append("Покажи различия между темами, сюжетами или типами реакции.")
+
+        if re.search(r"почему|причин", prompt):
+            must_cover.append("Объясни причины реакции аудитории, а не только факт реакции.")
+
+        if re.search(r"интерес|вовлеч|резонанс", prompt):
+            must_cover.append("Ответь, что именно вызывает интерес аудитории.")
+
+        if re.search(r"негатив|эмоци|критик|возмущ|раздраж", prompt):
+            must_cover.append("Ответь, что именно вызывает негативные эмоции.")
+
+        if re.search(r"позитив|нрав|одобр|поддерж", prompt):
+            must_cover.append("Ответь, что аудитория воспринимает позитивно.")
+
+        if not must_cover:
+            must_cover.append("Дай максимально прямой и полезный ответ на пользовательский запрос.")
+
+        return {
+            "response_shape": response_shape,
+            "first_sentence_rule": first_sentence_rule,
+            "must_cover": must_cover,
+        }
+
+    def _extract_prompt_focus_terms(self, prompt_text: str | None) -> list[str]:
+        prompt = self._normalize_text(prompt_text or "")
+        if not prompt:
+            return []
+        tokens = re.findall(r"[a-zа-я0-9-]{4,}", prompt)
+        seen: list[str] = []
+        for token in tokens:
+            if token in PROMPT_STOPWORDS:
+                continue
+            if token not in seen:
+                seen.append(token)
+        return [self._titleize_phrase(token) for token in seen[:8]]
 
     def _extract_post_theme_candidates(self, posts: list[dict]) -> list[str]:
         if len(posts) < 2:
