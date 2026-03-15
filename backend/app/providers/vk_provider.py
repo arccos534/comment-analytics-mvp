@@ -68,7 +68,11 @@ class VkProvider(BaseProvider):
                 return result
 
             owner_id, post_id = self._parse_vk_post_id(result.external_source_id)
-            post = self._api_call("wall.getById", {"posts": f"{owner_id}_{post_id}"}, client=client)[0]
+            response = self._api_call("wall.getById", {"posts": f"{owner_id}_{post_id}"}, client=client)
+            posts = self._coerce_wall_get_by_id_response(response)
+            if not posts:
+                raise ProviderRequestError("VK post metadata not found")
+            post = posts[0]
             result.external_source_id = f"{owner_id}_{post_id}"
             result.title = self._build_post_title(post)
             return result
@@ -86,7 +90,8 @@ class VkProvider(BaseProvider):
         with self._make_http_client() as client:
             if source.source_type == SourceTypeEnum.post:
                 owner_id, post_id = self._parse_vk_post_id(source.external_source_id)
-                items = self._api_call("wall.getById", {"posts": f"{owner_id}_{post_id}"}, client=client)
+                response = self._api_call("wall.getById", {"posts": f"{owner_id}_{post_id}"}, client=client)
+                items = self._coerce_wall_get_by_id_response(response)
             else:
                 owner_id = int(source.external_source_id)
                 items = self._fetch_all_wall_posts(owner_id, since_dt, until_dt, limit, client=client)
@@ -219,6 +224,17 @@ class VkProvider(BaseProvider):
         if not groups:
             raise ProviderRequestError("VK group metadata not found")
         return groups[0]
+
+    def _coerce_wall_get_by_id_response(self, response: Any) -> list[dict[str, Any]]:
+        if isinstance(response, list):
+            return response
+        if isinstance(response, dict):
+            items = response.get("items")
+            if isinstance(items, list):
+                return items
+            if {"id", "owner_id"} <= response.keys():
+                return [response]
+        raise ProviderRequestError("VK wall.getById returned an unexpected payload")
 
     def _api_call(self, method: str, params: dict[str, Any], client: httpx.Client | None = None) -> Any:
         self._ensure_token()
