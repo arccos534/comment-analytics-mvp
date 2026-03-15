@@ -4,7 +4,14 @@ from collections import Counter, defaultdict
 
 
 class ReportAggregator:
-    def build_report(self, run, enriched_comments: list[dict], filters: dict, scoped_posts: list[dict] | None = None) -> dict:
+    def build_report(
+        self,
+        run,
+        enriched_comments: list[dict],
+        filters: dict,
+        scoped_posts: list[dict] | None = None,
+        selected_sources: list[dict] | None = None,
+    ) -> dict:
         relevant_comments = [item for item in enriched_comments if item["relevance_score"] >= 0.05]
         working_set = relevant_comments or enriched_comments
         scoped_posts = scoped_posts or []
@@ -150,6 +157,17 @@ class ReportAggregator:
                 "reposts_count": 0,
             }
         )
+
+        for source in selected_sources or []:
+            source_id = str(source.get("source_id") or "")
+            if not source_id:
+                continue
+            bucket = source_scores[source_id]
+            bucket["source_id"] = source_id
+            bucket["source_title"] = source.get("source_title")
+            bucket["source_url"] = source.get("source_url")
+            bucket["platform"] = source.get("platform")
+            bucket["subscriber_count"] = source.get("subscriber_count")
 
         for item in post_items:
             source_id = str(item.get("source_id") or "")

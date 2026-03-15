@@ -545,6 +545,7 @@ class AnalyticsService:
         try:
             platform_filters = (run.filters_json or {}).get("platforms") or []
             source_filters = [UUID(value) for value in ((run.filters_json or {}).get("source_ids") or [])]
+            available_sources = self._resolve_analysis_sources(run.project_id, source_filters, platform_filters)
             records = self.comments.get_analysis_records(
                 run.project_id,
                 period_from=run.period_from,
@@ -644,6 +645,7 @@ class AnalyticsService:
                     "source_ids": [str(source_id) for source_id in source_filters],
                 },
                 scoped_posts=scoped_posts,
+                selected_sources=available_sources,
             )
             summary_data, summary_text = self.report_service.build_summary(report_json, prompt_text=run.prompt_text)
             report_json["summary"] = summary_data
@@ -654,3 +656,24 @@ class AnalyticsService:
             logger.exception("Analytics run failed", extra={"analysis_run_id": str(run.id), "project_id": str(run.project_id)})
             self.analysis_repo.update_run_status(run.id, AnalysisRunStatusEnum.failed, finished_at=utcnow())
             return {"status": "failed", "analysis_run_id": str(run.id)}
+
+    def _resolve_analysis_sources(self, project_id: UUID, source_filters: list[UUID], platform_filters: list[str]) -> list[dict]:
+        project = self.projects.get(project_id)
+        sources = project.sources if project else []
+        resolved: list[dict] = []
+        for source in sources:
+            if source_filters and source.id not in source_filters:
+                continue
+            platform = getattr(source.platform, "value", str(source.platform))
+            if platform_filters and platform not in platform_filters:
+                continue
+            resolved.append(
+                {
+                    "source_id": str(source.id),
+                    "source_title": source.title,
+                    "source_url": source.source_url,
+                    "platform": platform,
+                    "subscriber_count": source.subscriber_count,
+                }
+            )
+        return resolved

@@ -15,6 +15,16 @@ export function TopPostsCard({ title, posts }: { title: string; posts: ReportPos
               <div className="mt-2 text-xs text-muted-foreground">
                 score: {post.score} | comments: {post.comments_count}
               </div>
+              {post.post_url ? (
+                <a
+                  href={post.post_url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="mt-3 inline-flex rounded-full border border-primary/20 bg-primary/10 px-3 py-1 text-xs font-medium text-primary transition hover:bg-primary/15"
+                >
+                  Source post
+                </a>
+              ) : null}
             </div>
           ))
         ) : (

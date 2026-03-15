@@ -100,6 +100,16 @@ export function ThemeReactionCard({
                   <div className="mt-2 text-sm leading-6 text-foreground/92">
                     {item.leading_post.post_text || "Нет текста поста"}
                   </div>
+                  {item.leading_post.post_url ? (
+                    <a
+                      href={item.leading_post.post_url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="mt-3 inline-flex rounded-full border border-primary/20 bg-primary/10 px-3 py-1 text-xs font-medium text-primary transition hover:bg-primary/15"
+                    >
+                      Source post
+                    </a>
+                  ) : null}
                 </div>
               </div>
             ))}
