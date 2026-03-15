@@ -26,6 +26,7 @@ export function AnalyticsForm({ projectId, sources }: { projectId: string; sourc
   const [selectedSourceIds, setSelectedSourceIds] = useState<string[]>([]);
 
   const readySources = useMemo(() => sources.filter((source) => source.status === "ready"), [sources]);
+  const allSourcesSelected = readySources.length > 0 && readySources.every((source) => selectedSourceIds.includes(source.id));
 
   async function handleSubmit() {
     const run = await runAnalysis.mutateAsync({
@@ -54,6 +55,10 @@ export function AnalyticsForm({ projectId, sources }: { projectId: string; sourc
     setSelectedSourceIds((current) =>
       current.includes(sourceId) ? current.filter((item) => item !== sourceId) : [...current, sourceId]
     );
+  }
+
+  function toggleAllSources() {
+    setSelectedSourceIds(allSourcesSelected ? [] : readySources.map((source) => source.id));
   }
 
   return (
@@ -123,7 +128,12 @@ export function AnalyticsForm({ projectId, sources }: { projectId: string; sourc
             </div>
           </div>
           <div className="space-y-3">
-            <Label>Sources</Label>
+            <div className="flex items-center justify-between gap-3">
+              <Label>Sources</Label>
+              <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={toggleAllSources} disabled={!readySources.length}>
+                {allSourcesSelected ? "Clear all" : "Select all"}
+              </Button>
+            </div>
             <div className="max-h-60 space-y-2 overflow-auto rounded-2xl bg-muted p-3">
               {readySources.length ? (
                 readySources.map((source) => (
