@@ -316,9 +316,10 @@ class SummaryGenerator:
             "Сформируй внутренний план ответа, но не показывай его. Затем дай конкретный ответ именно на этот запрос. "
             "Опирайся прежде всего на сами посты и новости, а комментарии используй как слой подтверждения: "
             "интерес, негатив, одобрение, претензии, тональность и характер реакции. "
-            "Когда речь идет о наиболее обсуждаемых, заметных или интересных новостях, ориентируйся прежде всего на количество комментариев, лайков и репостов у постов. "
+            "Когда речь идет о наиболее обсуждаемых, заметных или интересных новостях, ориентируйся прежде всего на количество комментариев, реакций или лайков и репостов у постов. "
+            "Для Telegram поле likes_count в payload означает количество реакций на посте, для VK — количество лайков. "
             "Если пользователь спрашивает о самой обсуждаемой новости, назови ее прямо и объясни, почему она самая обсуждаемая "
-            "(число комментариев, лайков, репостов, вовлеченность, характер реакции). "
+            "(число комментариев, реакций или лайков, репостов, вовлеченность, характер реакции). "
             "Первое содержательное предложение должно сразу отвечать на пользовательский запрос, без вводных фраз вроде 'по выборке видна картина' или 'в целом можно сказать'. "
             "Если answer_strategy указывает на один конкретный объект или один главный вывод, начни текст именно с него. "
             "Если answer_strategy указывает на сравнение или ранжирование, строй ответ вокруг сравнения или ранжирования, а не вокруг общей статистики. "
@@ -939,6 +940,7 @@ class SummaryGenerator:
     def _compact_post(self, post: dict) -> dict:
         return {
             "post_text": self._shorten(post.get("post_text") or "", limit=220),
+            "platform": post.get("platform"),
             "score": post.get("score", 0),
             "comments_count": post.get("comments_count", 0),
             "relevant_comments_count": post.get("relevant_comments_count", 0),
@@ -953,6 +955,9 @@ class SummaryGenerator:
                 int(post.get("neutral_relevant_comments_count", 0) or 0),
             ),
         }
+
+    def _engagement_metric_label(self, post: dict) -> str:
+        return "реакций" if (post.get("platform") or "") == "telegram" else "лайков"
 
     def _build_takeaways(self, report_json: dict, payload: dict, prompt_text: str | None) -> list[str]:
         stats = report_json.get("stats", {})
@@ -990,8 +995,9 @@ class SummaryGenerator:
                 ),
                 reverse=True,
             )[0]
+            metric_label = self._engagement_metric_label(most_interesting)
             takeaways.append(
-                f"Самый сильный отклик вызывает тема «{most_interesting['theme']}»: {most_interesting['comments_count']} комментариев, {most_interesting['likes_count']} лайков и {most_interesting['reposts_count']} репостов."
+                f"Самый сильный отклик вызывает тема «{most_interesting['theme']}»: {most_interesting['comments_count']} комментариев, {most_interesting['likes_count']} {metric_label} и {most_interesting['reposts_count']} репостов."
             )
 
             strongest_negative = next(
@@ -1053,9 +1059,10 @@ class SummaryGenerator:
 
         if "most_discussed_news" in modes and top_discussed_posts:
             lead = top_discussed_posts[0]
+            metric_label = self._engagement_metric_label(lead)
             parts.append(
                 f"Самой обсуждаемой новостью в текущей выборке выглядит публикация «{lead['post_text']}»: "
-                f"она собрала {lead['comments_count']} комментариев, {lead['likes_count']} лайков, "
+                f"она собрала {lead['comments_count']} комментариев, {lead['likes_count']} {metric_label}, "
                 f"{lead['reposts_count']} репостов и score {lead['score']}. "
             )
 

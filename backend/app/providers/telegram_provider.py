@@ -222,13 +222,14 @@ class TelegramProvider(BaseProvider):
         post_url = source.source_url if source.source_type == SourceTypeEnum.post else f"https://t.me/{username}/{message.id}"
         comments_count = getattr(getattr(message, "replies", None), "replies", 0) or 0
         views_count = getattr(message, "views", None) or 0
+        reactions_count = self._extract_reactions_count(message)
 
         return NormalizedPost(
             external_post_id=str(message.id),
             post_url=post_url,
             post_text=getattr(message, "message", None),
             post_date=message.date,
-            likes_count=0,
+            likes_count=reactions_count,
             reposts_count=getattr(message, "forwards", None) or 0,
             views_count=views_count,
             comments_count=comments_count,
@@ -272,6 +273,17 @@ class TelegramProvider(BaseProvider):
         last_name = getattr(sender, "last_name", None) or ""
         full_name = f"{first_name} {last_name}".strip()
         return full_name or None
+
+    def _extract_reactions_count(self, message: Any) -> int:
+        reactions = getattr(message, "reactions", None)
+        if not reactions:
+            return 0
+
+        results = getattr(reactions, "results", None) or []
+        total = 0
+        for item in results:
+            total += int(getattr(item, "count", 0) or 0)
+        return total
 
     def _extract_parent_comment_id(self, message: Any) -> str | None:
         reply_to = getattr(message, "reply_to", None)

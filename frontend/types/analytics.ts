@@ -104,6 +104,7 @@ export interface ReportPost {
   post_id: string | null;
   post_url: string;
   post_text: string | null;
+  platform?: string | null;
   score: number;
   comments_count: number;
   relevant_comments_count?: number | null;
