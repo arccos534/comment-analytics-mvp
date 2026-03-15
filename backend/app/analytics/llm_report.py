@@ -420,8 +420,13 @@ class SummaryGenerator:
         top_popular = (posts.get("top_popular", []) or [])[:5]
         top_unpopular = (posts.get("top_unpopular", []) or [])[:5]
         source_comparison = (report_json.get("sources", {}).get("comparison", []) or [])[:8]
+        declared_theme = (report_json.get("meta", {}).get("post_theme") or "").strip() or None
+        theme_scoped_posts = self._filter_posts_for_declared_theme(
+            matched_posts + top_popular + top_unpopular,
+            declared_theme,
+        )
         top_discussed = sorted(
-            matched_posts,
+            theme_scoped_posts or matched_posts,
             key=lambda post: (post.get("comments_count", 0), post.get("score", 0)),
             reverse=True,
         )[:5]
@@ -436,14 +441,14 @@ class SummaryGenerator:
         heuristic_post_themes = self._extract_post_theme_candidates(
             matched_posts + top_popular + top_unpopular,
             prompt_text=prompt_text,
-            declared_theme=(report_json.get("meta", {}).get("post_theme") or "").strip() or None,
+            declared_theme=declared_theme,
         )
         derived_post_themes = self._extract_post_themes_with_llm(
             matched_posts=matched_posts,
             top_popular=top_popular,
             top_unpopular=top_unpopular,
             prompt_text=prompt_text,
-            declared_theme=(report_json.get("meta", {}).get("post_theme") or "").strip() or None,
+            declared_theme=declared_theme,
             heuristic_themes=heuristic_post_themes,
         )
         prompt_mode = self._infer_prompt_mode(prompt_text)
@@ -452,6 +457,7 @@ class SummaryGenerator:
         return {
             "analysis_request": {
                 "theme_of_posts": (report_json.get("meta", {}).get("post_theme") or "").strip() or None,
+                "declared_theme_present": bool(declared_theme),
                 "keywords_for_posts": report_json.get("meta", {}).get("post_keywords", []),
                 "user_prompt": (prompt_text or "").strip(),
                 "prompt_mode": prompt_mode,
@@ -496,9 +502,25 @@ class SummaryGenerator:
             },
             "matched_posts": [self._compact_post(post) for post in matched_posts],
             "top_discussed_posts": [self._compact_post(post) for post in top_discussed],
+            "theme_scoped_posts": [self._compact_post(post) for post in (theme_scoped_posts[:8] if theme_scoped_posts else [])],
             "top_popular_posts": [self._compact_post(post) for post in top_popular],
             "top_unpopular_posts": [self._compact_post(post) for post in top_unpopular],
         }
+
+    def _filter_posts_for_declared_theme(self, posts: list[dict], declared_theme: str | None) -> list[dict]:
+        if not declared_theme:
+            return []
+        unique: list[dict] = []
+        seen: set[str] = set()
+        for post in posts:
+            post_id = str(post.get("post_id") or "")
+            if post_id and post_id in seen:
+                continue
+            if self._theme_matches_post(declared_theme, post):
+                unique.append(post)
+                if post_id:
+                    seen.add(post_id)
+        return unique
 
     def _extract_post_themes_with_llm(
         self,
