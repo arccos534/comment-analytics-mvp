@@ -102,6 +102,26 @@ PROMPT_SCOPE_STOPWORDS = REPORT_TITLE_STOPWORDS | {
     "РІС‹РІРѕРґ",
 }
 
+GENERIC_PROMPT_SCOPE_TERMS = {
+    "новость",
+    "новости",
+    "пост",
+    "посты",
+    "люди",
+    "думают",
+    "думать",
+    "была",
+    "были",
+    "самая",
+    "самой",
+    "самый",
+    "обсуждаемая",
+    "обсуждаемой",
+    "обсуждаемый",
+    "обсуждали",
+    "мнение",
+}
+
 
 class AnalyticsService:
     def __init__(self, db: Session) -> None:
@@ -245,12 +265,16 @@ class AnalyticsService:
         if not prompt_terms:
             return True
 
-        lowered = text.lower()
-        overlap = sum(1 for token in prompt_terms if token in lowered)
-        if overlap >= 2 or (len(prompt_terms) <= 2 and overlap >= 1):
+        focus_terms = [term for term in prompt_terms if term not in GENERIC_PROMPT_SCOPE_TERMS]
+        if not focus_terms:
             return True
 
-        return self.relevance.score(text, (prompt_text or "").strip()) >= 0.18
+        lowered = text.lower()
+        overlap = sum(1 for token in focus_terms if token in lowered)
+        if overlap >= 2 or (len(focus_terms) <= 3 and overlap >= 1):
+            return True
+
+        return self.relevance.score(text, (prompt_text or "").strip()) >= 0.15
 
     def _is_advertising_post(self, post_text: str | None) -> bool:
         text = (post_text or "").strip().lower()
