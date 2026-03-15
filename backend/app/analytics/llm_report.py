@@ -1248,7 +1248,6 @@ class SummaryGenerator:
             "post_id": post.get("post_id"),
             "post_text": self._shorten(post.get("post_text") or "", limit=220),
             "platform": post.get("platform"),
-            "score": post.get("score", 0),
             "comments_count": post.get("comments_count", 0),
             "relevant_comments_count": post.get("relevant_comments_count", 0),
             "positive_relevant_comments_count": post.get("positive_relevant_comments_count", 0),
@@ -1457,7 +1456,7 @@ class SummaryGenerator:
             parts.append(
                 f"Самой обсуждаемой новостью в текущей выборке выглядит публикация «{lead['post_text']}»: "
                 f"она собрала {lead['comments_count']} комментариев, {lead['likes_count']} {metric_label}, "
-                f"{lead['reposts_count']} репостов и score {lead['score']}. "
+                f"{lead['reposts_count']} репостов. "
             )
 
         if not source_only and derived_post_themes:

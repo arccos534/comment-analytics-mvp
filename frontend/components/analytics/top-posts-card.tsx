@@ -13,7 +13,7 @@ export function TopPostsCard({ title, posts }: { title: string; posts: ReportPos
             <div key={post.post_id || post.post_url} className="rounded-2xl border border-border/60 bg-background/55 p-4">
               <div className="text-sm font-medium">{post.post_text || post.post_url}</div>
               <div className="mt-2 text-xs text-muted-foreground">
-                score: {post.score} | comments: {post.comments_count}
+                comments: {post.comments_count}
               </div>
               {post.post_url ? (
                 <a
