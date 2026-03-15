@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import Select, select
 from sqlalchemy.orm import Session
 
 from app.models.post import Post
@@ -21,6 +21,39 @@ class PostRepository:
             .order_by(Post.post_date.desc())
         )
         return list(self.db.scalars(stmt))
+
+    def build_analysis_query(
+        self,
+        project_id: UUID,
+        period_from: datetime | None = None,
+        period_to: datetime | None = None,
+        source_ids: list[UUID] | None = None,
+        platforms: list[str] | None = None,
+    ) -> Select[tuple[Post, Source]]:
+        stmt = (
+            select(Post, Source)
+            .join(Source, Post.source_id == Source.id)
+            .where(Source.project_id == project_id)
+        )
+        if period_from:
+            stmt = stmt.where(Post.post_date >= period_from)
+        if period_to:
+            stmt = stmt.where(Post.post_date <= period_to)
+        if source_ids:
+            stmt = stmt.where(Source.id.in_(source_ids))
+        if platforms:
+            stmt = stmt.where(Source.platform.in_(platforms))
+        return stmt.order_by(Post.post_date.desc())
+
+    def get_analysis_posts(
+        self,
+        project_id: UUID,
+        period_from: datetime | None = None,
+        period_to: datetime | None = None,
+        source_ids: list[UUID] | None = None,
+        platforms: list[str] | None = None,
+    ) -> list[tuple[Post, Source]]:
+        return list(self.db.execute(self.build_analysis_query(project_id, period_from, period_to, source_ids, platforms)))
 
     def get_by_source_and_external_id(self, source_id: UUID, external_post_id: str) -> Post | None:
         return self.db.scalar(

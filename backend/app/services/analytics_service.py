@@ -16,6 +16,7 @@ from app.models.analysis_run import AnalysisRun
 from app.models.enums import AnalysisRunStatusEnum
 from app.repositories.analysis_repository import AnalysisRepository
 from app.repositories.comment_repository import CommentRepository
+from app.repositories.post_repository import PostRepository
 from app.repositories.project_repository import ProjectRepository
 from app.schemas.analytics import AnalysisCreateRequest
 from app.services.report_service import ReportService
@@ -107,6 +108,7 @@ class AnalyticsService:
         self.db = db
         self.projects = ProjectRepository(db)
         self.comments = CommentRepository(db)
+        self.posts = PostRepository(db)
         self.analysis_repo = AnalysisRepository(db)
         self.sentiment = SentimentAnalyzer()
         self.keywords = KeywordExtractor()
@@ -331,6 +333,24 @@ class AnalyticsService:
                 source_ids=source_filters,
                 platforms=platform_filters,
             )
+            post_records = self.posts.get_analysis_posts(
+                run.project_id,
+                period_from=run.period_from,
+                period_to=run.period_to,
+                source_ids=source_filters,
+                platforms=platform_filters,
+            )
+            scoped_posts = [
+                {"post": post, "source": source}
+                for post, source in post_records
+                if self._matches_post_scope(
+                    post.post_text,
+                    run.theme,
+                    run.keywords_json or [],
+                    run.prompt_text,
+                )
+                and not self._is_advertising_post(post.post_text)
+            ]
             scoped_records = [
                 record
                 for record in records
@@ -383,6 +403,7 @@ class AnalyticsService:
                     "platforms": platform_filters,
                     "source_ids": [str(source_id) for source_id in source_filters],
                 },
+                scoped_posts=scoped_posts,
             )
             summary_data, summary_text = self.report_service.build_summary(report_json, prompt_text=run.prompt_text)
             report_json["summary"] = summary_data

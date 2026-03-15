@@ -4,9 +4,10 @@ from collections import Counter, defaultdict
 
 
 class ReportAggregator:
-    def build_report(self, run, enriched_comments: list[dict], filters: dict) -> dict:
+    def build_report(self, run, enriched_comments: list[dict], filters: dict, scoped_posts: list[dict] | None = None) -> dict:
         relevant_comments = [item for item in enriched_comments if item["relevance_score"] >= 0.05]
         working_set = relevant_comments or enriched_comments
+        scoped_posts = scoped_posts or []
 
         sentiment_counter = Counter(item["sentiment"] for item in working_set)
         topic_counter = Counter(topic for item in working_set for topic in item["topics"])
@@ -29,6 +30,7 @@ class ReportAggregator:
 
         for item in working_set:
             post = item["post"]
+            source = item["source"]
             bucket = post_scores[str(post.id)]
             bucket["post_id"] = str(post.id)
             bucket["post_url"] = post.post_url
@@ -43,8 +45,21 @@ class ReportAggregator:
             bucket["reposts_count"] = getattr(post, "reposts_count", 0)
             bucket["views_count"] = getattr(post, "views_count", 0)
 
+        for item in scoped_posts:
+            post = item["post"]
+            source = item["source"]
+            bucket = post_scores[str(post.id)]
+            bucket["post_id"] = str(post.id)
+            bucket["post_url"] = post.post_url
+            bucket["post_text"] = post.post_text
+            bucket["platform"] = getattr(source.platform, "value", str(source.platform))
+            bucket["platform_comments_count"] = max(bucket["platform_comments_count"], getattr(post, "comments_count", 0))
+            bucket["likes_count"] = getattr(post, "likes_count", 0)
+            bucket["reposts_count"] = getattr(post, "reposts_count", 0)
+            bucket["views_count"] = getattr(post, "views_count", 0)
+
         total_comments = len(working_set)
-        total_posts = len({str(item["post"].id) for item in working_set})
+        total_posts = len(post_scores)
         total_comments_base = max(total_comments, 1)
 
         topics = [
