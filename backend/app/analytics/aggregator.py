@@ -16,6 +16,9 @@ class ReportAggregator:
                 "post_url": "",
                 "post_text": None,
                 "relevant_comments_count": 0,
+                "positive_relevant_comments_count": 0,
+                "negative_relevant_comments_count": 0,
+                "neutral_relevant_comments_count": 0,
                 "platform_comments_count": 0,
                 "likes_count": 0,
                 "reposts_count": 0,
@@ -30,6 +33,9 @@ class ReportAggregator:
             bucket["post_url"] = post.post_url
             bucket["post_text"] = post.post_text
             bucket["relevant_comments_count"] += 1
+            sentiment = item["sentiment"]
+            if sentiment in {"positive", "negative", "neutral"}:
+                bucket[f"{sentiment}_relevant_comments_count"] += 1
             bucket["platform_comments_count"] = max(bucket["platform_comments_count"], getattr(post, "comments_count", 0))
             bucket["likes_count"] = getattr(post, "likes_count", 0)
             bucket["reposts_count"] = getattr(post, "reposts_count", 0)
@@ -83,6 +89,9 @@ class ReportAggregator:
                 "score": popularity_score(value),
                 "comments_count": value["platform_comments_count"],
                 "relevant_comments_count": value["relevant_comments_count"],
+                "positive_relevant_comments_count": value["positive_relevant_comments_count"],
+                "negative_relevant_comments_count": value["negative_relevant_comments_count"],
+                "neutral_relevant_comments_count": value["neutral_relevant_comments_count"],
                 "likes_count": value["likes_count"],
                 "reposts_count": value["reposts_count"],
             }

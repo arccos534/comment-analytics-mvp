@@ -303,6 +303,9 @@ class SummaryGenerator:
             "Если answer_strategy указывает на один конкретный объект или один главный вывод, начни текст именно с него. "
             "Если answer_strategy указывает на сравнение или ранжирование, строй ответ вокруг сравнения или ранжирования, а не вокруг общей статистики. "
             "Если пользователь спрашивает о темах, выделяй только темы, которые реально подтверждаются несколькими постами или ключевыми постами выборки. "
+            "Если в payload есть focus_evidence, используй его как основной слой доказательств для того, какие сюжеты ближе всего к формулировке пользовательского запроса. "
+            "Если в payload есть theme_reaction_map, используй его как готовую карту связок тема -> интерес -> тип реакции аудитории. "
+            "Если confidence_assessment = low, говори осторожно и не делай сильных обобщений. "
             "Не используй мусорные формулировки вроде 'Общее обсуждение', если они не помогают ответить на вопрос. "
             "Не придумывай темы из одиночных слов без смысловой опоры. "
             "Ответ должен быть четким, структурированным и полезным для заказчика. "
@@ -343,6 +346,7 @@ class SummaryGenerator:
             declared_theme=(report_json.get("meta", {}).get("post_theme") or "").strip() or None,
         )
         prompt_mode = self._infer_prompt_mode(prompt_text)
+        prompt_focus_terms = self._extract_prompt_focus_terms(prompt_text)
 
         return {
             "analysis_request": {
@@ -352,15 +356,28 @@ class SummaryGenerator:
                 "prompt_mode": prompt_mode,
                 "request_contract": self._infer_request_contract(prompt_text),
                 "answer_strategy": self._build_answer_strategy(prompt_text),
-                "prompt_focus_terms": self._extract_prompt_focus_terms(prompt_text),
+                "prompt_focus_terms": prompt_focus_terms,
                 "period_from": report_json.get("meta", {}).get("period_from"),
                 "period_to": report_json.get("meta", {}).get("period_to"),
                 "platforms": report_json.get("meta", {}).get("platforms", []),
             },
             "coverage": report_json.get("stats", {}),
+            "confidence_assessment": self._build_confidence_assessment(report_json),
             "sentiment_distribution": report_json.get("sentiment", {}),
             "derived_post_themes": derived_post_themes,
+            "theme_reaction_map": self._build_theme_reaction_map(
+                derived_post_themes,
+                matched_posts,
+                top_popular,
+                top_unpopular,
+            ),
             "comment_topics": meaningful_topics,
+            "focus_evidence": self._build_prompt_focus_evidence(
+                prompt_focus_terms,
+                matched_posts,
+                top_popular,
+                top_unpopular,
+            ),
             "positive_signals": {
                 "patterns": report_json.get("insights", {}).get("liked_patterns", []),
                 "topics": self._extract_comment_signal_topics(report_json, "positive"),
@@ -379,6 +396,117 @@ class SummaryGenerator:
             "top_popular_posts": [self._compact_post(post) for post in top_popular],
             "top_unpopular_posts": [self._compact_post(post) for post in top_unpopular],
         }
+
+    def _build_confidence_assessment(self, report_json: dict) -> dict:
+        stats = report_json.get("stats", {})
+        total_posts = int(stats.get("total_posts", 0) or 0)
+        analyzed_comments = int(stats.get("analyzed_comments", 0) or 0)
+
+        if total_posts >= 8 and analyzed_comments >= 40:
+            return {
+                "level": "high",
+                "reason": "В выборке достаточно постов и релевантных комментариев для уверенного вывода.",
+            }
+        if total_posts >= 4 and analyzed_comments >= 15:
+            return {
+                "level": "medium",
+                "reason": "Данных достаточно для предварительных выводов, но отдельные темы могут быть представлены неравномерно.",
+            }
+        return {
+            "level": "low",
+            "reason": "Данных мало, поэтому выводы стоит считать предварительными и использовать с осторожностью.",
+        }
+
+    def _build_theme_reaction_map(
+        self,
+        themes: list[str],
+        matched_posts: list[dict],
+        top_popular_posts: list[dict],
+        top_unpopular_posts: list[dict],
+    ) -> list[dict]:
+        posts = matched_posts or top_popular_posts or top_unpopular_posts
+        result: list[dict] = []
+        for theme in themes[:6]:
+            matching = [post for post in posts if self._theme_matches_post(theme, post)]
+            if not matching:
+                continue
+            comments_total = sum(int(post.get("comments_count", 0) or 0) for post in matching)
+            likes_total = sum(int(post.get("likes_count", 0) or 0) for post in matching)
+            reposts_total = sum(int(post.get("reposts_count", 0) or 0) for post in matching)
+            positive_total = sum(int(post.get("positive_relevant_comments_count", 0) or 0) for post in matching)
+            negative_total = sum(int(post.get("negative_relevant_comments_count", 0) or 0) for post in matching)
+            neutral_total = sum(int(post.get("neutral_relevant_comments_count", 0) or 0) for post in matching)
+            leader = sorted(
+                matching,
+                key=lambda post: (
+                    int(post.get("comments_count", 0) or 0),
+                    int(post.get("likes_count", 0) or 0),
+                    int(post.get("reposts_count", 0) or 0),
+                    float(post.get("score", 0) or 0),
+                ),
+                reverse=True,
+            )[0]
+            result.append(
+                {
+                    "theme": theme,
+                    "posts_count": len(matching),
+                    "comments_count": comments_total,
+                    "likes_count": likes_total,
+                    "reposts_count": reposts_total,
+                    "interest_level": self._engagement_label(comments_total, likes_total, reposts_total),
+                    "reaction_tendency": self._reaction_label(positive_total, negative_total, neutral_total),
+                    "positive_comments": positive_total,
+                    "negative_comments": negative_total,
+                    "neutral_comments": neutral_total,
+                    "leading_post": self._compact_post(leader),
+                }
+            )
+        return result
+
+    def _build_prompt_focus_evidence(
+        self,
+        focus_terms: list[str],
+        matched_posts: list[dict],
+        top_popular_posts: list[dict],
+        top_unpopular_posts: list[dict],
+    ) -> list[dict]:
+        if not focus_terms:
+            return []
+
+        candidates = matched_posts + top_popular_posts + top_unpopular_posts
+        seen: set[str] = set()
+        scored: list[tuple[tuple[int, int, int, float], dict]] = []
+
+        for post in candidates:
+            post_id = str(post.get("post_id") or "")
+            if post_id and post_id in seen:
+                continue
+            if post_id:
+                seen.add(post_id)
+
+            text = self._normalize_text(post.get("post_text") or "")
+            matched_terms = [term for term in focus_terms if self._normalize_text(term) in text]
+            if not matched_terms:
+                continue
+
+            rank = (
+                len(matched_terms),
+                int(post.get("comments_count", 0) or 0),
+                int(post.get("likes_count", 0) or 0) + int(post.get("reposts_count", 0) or 0),
+                float(post.get("score", 0) or 0),
+            )
+            scored.append(
+                (
+                    rank,
+                    {
+                        "matched_terms": matched_terms,
+                        "post": self._compact_post(post),
+                    },
+                )
+            )
+
+        scored.sort(key=lambda item: item[0], reverse=True)
+        return [payload for _, payload in scored[:5]]
 
     def _infer_prompt_mode(self, prompt_text: str | None) -> list[str]:
         prompt = self._normalize_text(prompt_text or "")
@@ -756,8 +884,16 @@ class SummaryGenerator:
             "score": post.get("score", 0),
             "comments_count": post.get("comments_count", 0),
             "relevant_comments_count": post.get("relevant_comments_count", 0),
+            "positive_relevant_comments_count": post.get("positive_relevant_comments_count", 0),
+            "negative_relevant_comments_count": post.get("negative_relevant_comments_count", 0),
+            "neutral_relevant_comments_count": post.get("neutral_relevant_comments_count", 0),
             "likes_count": post.get("likes_count", 0),
             "reposts_count": post.get("reposts_count", 0),
+            "reaction_tendency": self._reaction_label(
+                int(post.get("positive_relevant_comments_count", 0) or 0),
+                int(post.get("negative_relevant_comments_count", 0) or 0),
+                int(post.get("neutral_relevant_comments_count", 0) or 0),
+            ),
         }
 
     def _build_fallback_summary(self, report_json: dict, prompt_text: str | None, payload: dict) -> str:
@@ -774,6 +910,8 @@ class SummaryGenerator:
         positive_topics = payload["positive_signals"]["topics"] or payload["positive_signals"]["patterns"]
         negative_topics = payload["negative_signals"]["topics"] or payload["negative_signals"]["patterns"]
         top_discussed_posts = payload["top_discussed_posts"]
+        focus_evidence = payload.get("focus_evidence", [])
+        theme_reaction_map = payload.get("theme_reaction_map", [])
 
         if analyzed_comments <= 0:
             return (
@@ -801,7 +939,13 @@ class SummaryGenerator:
             )
 
         if "interest_analysis" in modes:
-            if top_discussed_posts:
+            if focus_evidence:
+                lead_focus = focus_evidence[0]["post"]
+                parts.append(
+                    f"Ближе всего к фокусу запроса оказываются сюжеты вокруг публикации «{lead_focus['post_text']}», "
+                    "и именно вокруг них заметнее всего концентрируется обсуждение. "
+                )
+            elif top_discussed_posts:
                 parts.append(
                     f"Наибольший интерес аудитории вызывают сюжеты вокруг публикаций, похожих на «{top_discussed_posts[0]['post_text']}», "
                     "поскольку именно вокруг них сосредоточен основной объем комментариев. "
@@ -815,11 +959,23 @@ class SummaryGenerator:
             parts.append(
                 f"Скорее позитивно аудитория относится к темам {self._join_list(positive_topics[:3])}. "
             )
+        elif theme_reaction_map:
+            positive_themes = [item["theme"] for item in theme_reaction_map if item.get("reaction_tendency") == "скорее позитивная"]
+            if positive_themes:
+                parts.append(
+                    f"Скорее позитивно аудитория относится к темам {self._join_list(positive_themes[:3])}. "
+                )
 
         if "negative_analysis" in modes and negative_topics:
             parts.append(
                 f"Негативные эмоции заметнее всего связаны с темами {self._join_list(negative_topics[:3])}. "
             )
+        elif theme_reaction_map:
+            negative_themes = [item["theme"] for item in theme_reaction_map if item.get("reaction_tendency") == "скорее негативная"]
+            if negative_themes:
+                parts.append(
+                    f"Негативные эмоции заметнее всего связаны с темами {self._join_list(negative_themes[:3])}. "
+                )
 
         parts.append(
             f"Распределение тональности по релевантным комментариям: позитив {sentiment.get('positive_percent', 0)}%, "
@@ -846,6 +1002,38 @@ class SummaryGenerator:
 
     def _normalize_text(self, value: str) -> str:
         return " ".join(value.lower().replace("ё", "е").split())
+
+    def _theme_matches_post(self, theme: str, post: dict) -> bool:
+        theme_text = self._normalize_text(theme)
+        post_text = self._normalize_text(post.get("post_text") or "")
+        if not theme_text or not post_text:
+            return False
+
+        for pattern, label in CANONICAL_THEME_PATTERNS:
+            if label == theme and re.search(pattern, post_text):
+                return True
+
+        tokens = [token for token in re.findall(r"[a-zа-я0-9-]{4,}", theme_text) if token not in POST_THEME_STOPWORDS]
+        if not tokens:
+            return False
+        return all(token in post_text for token in tokens[:2])
+
+    def _engagement_label(self, comments_count: int, likes_count: int, reposts_count: int) -> str:
+        score = comments_count * 5 + likes_count * 2 + reposts_count * 4
+        if score >= 150:
+            return "высокий"
+        if score >= 50:
+            return "средний"
+        return "низкий"
+
+    def _reaction_label(self, positive_count: int, negative_count: int, neutral_count: int) -> str:
+        if positive_count <= 0 and negative_count <= 0:
+            return "скорее нейтральная"
+        if positive_count >= negative_count * 2 and positive_count > neutral_count * 0.2:
+            return "скорее позитивная"
+        if negative_count >= positive_count * 2 and negative_count > neutral_count * 0.2:
+            return "скорее негативная"
+        return "скорее смешанная"
 
     def _titleize_phrase(self, phrase: str) -> str:
         parts = [part for part in phrase.split() if part]
