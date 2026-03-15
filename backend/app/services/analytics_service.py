@@ -210,6 +210,18 @@ GENERIC_PROMPT_SCOPE_TERMS_V2 = {
     "мнение",
 }
 
+GENERIC_THEME_SCOPE_TERMS = {
+    "город",
+    "города",
+    "городе",
+    "новость",
+    "новости",
+    "пост",
+    "посты",
+    "тема",
+    "темы",
+}
+
 RUSSIAN_STEM_SUFFIXES = (
     "иями",
     "ями",
@@ -404,6 +416,17 @@ class AnalyticsService:
                 return True
         return False
 
+    def _extract_theme_scope_terms(self, theme: str | None, keywords: list[str] | None) -> list[str]:
+        values = " ".join([(theme or "").strip(), " ".join(keywords or [])])
+        tokens = re.findall(r"[a-zа-я0-9-]{4,}", self._normalize_term(values))
+        ordered: list[str] = []
+        for token in tokens:
+            if token in PROMPT_SCOPE_STOPWORDS_V2 or token in GENERIC_THEME_SCOPE_TERMS:
+                continue
+            if token not in ordered:
+                ordered.append(token)
+        return ordered[:8]
+
     def _extract_prompt_scope_terms(self, prompt_text: str | None) -> list[str]:
         prompt = self._normalize_term(prompt_text or "")
         if not prompt:
@@ -495,6 +518,13 @@ class AnalyticsService:
         if normalized_keywords and any(keyword in lowered for keyword in normalized_keywords):
             return True
 
+        theme_terms = self._extract_theme_scope_terms(theme, normalized_keywords)
+        post_roots = self._extract_text_roots(lowered)
+        if theme_terms:
+            term_overlap = sum(1 for token in theme_terms if self._term_matches_scope(token, lowered, post_roots))
+            if term_overlap >= 1:
+                return True
+
         scope_tokens = self._tokenize_scope(" ".join([theme or "", " ".join(normalized_keywords)]))
         post_tokens = self._tokenize_scope(text)
         token_overlap = len(scope_tokens & post_tokens)
@@ -504,6 +534,8 @@ class AnalyticsService:
         topic_score = self.relevance.score_post_topic(text=text, theme=theme, keywords=keywords)
         if normalized_keywords:
             return topic_score >= 0.22
+        if theme_terms:
+            return topic_score >= 0.32
         return topic_score >= 0.18
 
     def execute_run_sync(self, analysis_run_id: UUID) -> dict:
