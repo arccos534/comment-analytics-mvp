@@ -224,6 +224,68 @@ PROMPT_STOPWORDS = POST_THEME_STOPWORDS | {
     "неделю",
 }
 
+SOURCE_METRIC_TERMS = {
+    "канал",
+    "канале",
+    "каналы",
+    "сообщество",
+    "сообщества",
+    "источник",
+    "источники",
+    "аудитория",
+    "аудитории",
+    "активная",
+    "активность",
+    "вовлеченность",
+    "метрики",
+    "охват",
+    "охваты",
+    "реакции",
+    "реакция",
+    "лайки",
+    "лайков",
+    "репосты",
+    "репостов",
+    "сравни",
+    "сравнить",
+}
+
+POST_SCOPE_TERMS = {
+    "новость",
+    "новости",
+    "пост",
+    "посты",
+    "публикация",
+    "публикации",
+    "тема",
+    "темы",
+    "сюжет",
+    "сюжеты",
+    "обсуждаемая",
+    "обсуждаемый",
+    "обсуждение",
+}
+
+COMMENT_REACTION_TERMS = {
+    "комментарий",
+    "комментарии",
+    "комментариев",
+    "реакция",
+    "реакции",
+    "думают",
+    "мнение",
+    "отношение",
+    "позитив",
+    "негатив",
+    "эмоции",
+    "жалобы",
+    "претензии",
+    "критикуют",
+    "поддерживают",
+    "поддержка",
+    "тревога",
+}
+
 CANONICAL_THEME_PATTERNS: list[tuple[str, str]] = [
     (r"\bинтернет\b.*\bподмосков", "Ограничения интернета в Подмосковье"),
     (r"\bподмосков[а-я]*\b.*\bинтернет", "Ограничения интернета в Подмосковье"),
@@ -421,12 +483,14 @@ class SummaryGenerator:
         top_unpopular = (posts.get("top_unpopular", []) or [])[:5]
         source_comparison = (report_json.get("sources", {}).get("comparison", []) or [])[:8]
         declared_theme = (report_json.get("meta", {}).get("post_theme") or "").strip() or None
+        analysis_axes = self._infer_analysis_axes(prompt_text)
         theme_scoped_posts = self._filter_posts_for_declared_theme(
             matched_posts + top_popular + top_unpopular,
             declared_theme,
         )
+        theme_basis_posts = theme_scoped_posts if declared_theme else (matched_posts + top_popular + top_unpopular)
         top_discussed = sorted(
-            theme_scoped_posts or matched_posts,
+            theme_scoped_posts if declared_theme else (theme_scoped_posts or matched_posts),
             key=lambda post: (post.get("comments_count", 0), post.get("score", 0)),
             reverse=True,
         )[:5]
@@ -439,14 +503,14 @@ class SummaryGenerator:
         ][: self.settings.llm_summary_max_topics]
 
         heuristic_post_themes = self._extract_post_theme_candidates(
-            matched_posts + top_popular + top_unpopular,
+            theme_basis_posts,
             prompt_text=prompt_text,
             declared_theme=declared_theme,
         )
         derived_post_themes = self._extract_post_themes_with_llm(
-            matched_posts=matched_posts,
-            top_popular=top_popular,
-            top_unpopular=top_unpopular,
+            matched_posts=theme_basis_posts if declared_theme else matched_posts,
+            top_popular=[] if declared_theme else top_popular,
+            top_unpopular=[] if declared_theme else top_unpopular,
             prompt_text=prompt_text,
             declared_theme=declared_theme,
             heuristic_themes=heuristic_post_themes,
@@ -460,9 +524,10 @@ class SummaryGenerator:
                 "declared_theme_present": bool(declared_theme),
                 "keywords_for_posts": report_json.get("meta", {}).get("post_keywords", []),
                 "user_prompt": (prompt_text or "").strip(),
+                "analysis_axes": analysis_axes,
                 "prompt_mode": prompt_mode,
                 "request_contract": self._infer_request_contract(prompt_text),
-                "answer_strategy": self._build_answer_strategy(prompt_text),
+                "answer_strategy": self._build_answer_strategy(prompt_text, analysis_axes),
                 "prompt_focus_terms": prompt_focus_terms,
                 "period_from": report_json.get("meta", {}).get("period_from"),
                 "period_to": report_json.get("meta", {}).get("period_to"),
@@ -475,16 +540,16 @@ class SummaryGenerator:
             "heuristic_post_themes": heuristic_post_themes,
             "theme_reaction_map": self._build_theme_reaction_map(
                 derived_post_themes,
-                matched_posts,
-                top_popular,
-                top_unpopular,
+                theme_basis_posts if declared_theme else matched_posts,
+                [] if declared_theme else top_popular,
+                [] if declared_theme else top_unpopular,
             ),
             "comment_topics": meaningful_topics,
             "focus_evidence": self._build_prompt_focus_evidence(
                 prompt_focus_terms,
-                matched_posts,
-                top_popular,
-                top_unpopular,
+                theme_scoped_posts if declared_theme else matched_posts,
+                [] if declared_theme else top_popular,
+                [] if declared_theme else top_unpopular,
             ),
             "source_comparison_map": source_comparison,
             "positive_signals": {
@@ -719,6 +784,21 @@ class SummaryGenerator:
         scored.sort(key=lambda item: item[0], reverse=True)
         return [payload for _, payload in scored[:5]]
 
+    def _infer_analysis_axes(self, prompt_text: str | None) -> list[str]:
+        prompt = self._normalize_text(prompt_text or "")
+        if not prompt:
+            return ["general"]
+
+        axes: list[str] = []
+        if any(term in prompt for term in SOURCE_METRIC_TERMS):
+            axes.append("source_metrics")
+        if any(term in prompt for term in POST_SCOPE_TERMS):
+            axes.append("post_scope")
+        if any(term in prompt for term in COMMENT_REACTION_TERMS):
+            axes.append("comment_reaction")
+
+        return axes or ["general"]
+
     def _infer_prompt_mode(self, prompt_text: str | None) -> list[str]:
         prompt = self._normalize_text(prompt_text or "")
         modes: list[str] = []
@@ -810,8 +890,9 @@ class SummaryGenerator:
             )
         return instructions
 
-    def _build_answer_strategy(self, prompt_text: str | None) -> dict:
+    def _build_answer_strategy(self, prompt_text: str | None, analysis_axes: list[str] | None = None) -> dict:
         prompt = self._normalize_text(prompt_text or "")
+        axes = set(analysis_axes or [])
         response_shape = "analysis_note"
         first_sentence_rule = "Начни с прямого ответа на пользовательский запрос."
         must_cover: list[str] = []
@@ -1226,8 +1307,12 @@ class SummaryGenerator:
         source_comparison = payload.get("source_comparison_map", []) or []
         request = payload.get("analysis_request", {}) or {}
         prompt_modes = set(request.get("prompt_mode", []) or [])
+        analysis_axes = set(request.get("analysis_axes", []) or [])
         prompt_focus_terms = request.get("prompt_focus_terms", []) or []
         related_themes = self._filter_prompt_related_themes(themes, focus_evidence, prompt_focus_terms)
+        source_only = "source_metrics" in analysis_axes and "post_scope" not in analysis_axes and "comment_reaction" not in analysis_axes
+        if request.get("theme_of_posts"):
+            top_discussed_posts = payload.get("theme_scoped_posts", []) or []
 
         takeaways: list[str] = []
 
@@ -1236,7 +1321,7 @@ class SummaryGenerator:
                 f"Выборка небольшая: {total_posts} постов и {analyzed_comments} релевантных комментариев, поэтому выводы предварительные."
             )
 
-        if "source_comparison" in prompt_modes and source_comparison:
+        if ("source_comparison" in prompt_modes or source_only) and source_comparison:
             lead_source = source_comparison[0]
             metric_label = "реакций" if (lead_source.get("platform") or "").lower() == "telegram" else "лайков"
             takeaways.append(
@@ -1255,7 +1340,7 @@ class SummaryGenerator:
                     unique.append(item)
             return unique[:3]
 
-        if focus_evidence:
+        if focus_evidence and not source_only:
             lead = focus_evidence[0]
             matched_terms = ", ".join(lead.get("matched_terms", [])[:3])
             post = lead.get("post", {})
@@ -1324,6 +1409,8 @@ class SummaryGenerator:
         request = payload["analysis_request"]
         prompt = request["user_prompt"] or "анализ реакции аудитории"
         modes = set(request["prompt_mode"])
+        analysis_axes = set(request.get("analysis_axes", []) or [])
+        source_only = "source_metrics" in analysis_axes and "post_scope" not in analysis_axes and "comment_reaction" not in analysis_axes
         declared_theme = request.get("theme_of_posts")
 
         total_posts = int(stats.get("total_posts", 0) or 0)
@@ -1344,7 +1431,7 @@ class SummaryGenerator:
 
         parts: list[str] = [f"По запросу «{prompt}» по текущей выборке видна следующая картина. "]
 
-        if "source_comparison" in modes and source_comparison:
+        if ("source_comparison" in modes or source_only) and source_comparison:
             lead = source_comparison[0]
             metric_label = "реакций" if (lead.get("platform") or "").lower() == "telegram" else "лайков"
             parts.append(
@@ -1359,7 +1446,7 @@ class SummaryGenerator:
                     f"поэтому лидерство видно не по одной новости, а по суммарной активности аудитории на уровне канала или сообщества. "
                 )
 
-        if "most_discussed_news" in modes and top_discussed_posts:
+        if not source_only and "most_discussed_news" in modes and top_discussed_posts:
             lead = top_discussed_posts[0]
             metric_label = self._engagement_metric_label(lead)
             parts.append(
@@ -1368,16 +1455,16 @@ class SummaryGenerator:
                 f"{lead['reposts_count']} репостов и score {lead['score']}. "
             )
 
-        if derived_post_themes:
+        if not source_only and derived_post_themes:
             parts.append(
                 f"На уровне самих новостей и постов заметнее всего темы {self._join_list(derived_post_themes[:4])}. "
             )
-        elif declared_theme:
+        elif not source_only and declared_theme:
             parts.append(
                 f"Фокус выборки задан темой «{declared_theme}», но при текущем объеме постов устойчивые подтемы автоматически выделяются слабо. "
             )
 
-        if "interest_analysis" in modes:
+        if not source_only and "interest_analysis" in modes:
             if focus_evidence:
                 lead_focus = focus_evidence[0]["post"]
                 parts.append(
@@ -1394,34 +1481,34 @@ class SummaryGenerator:
                     f"Наибольший интерес аудитории по текущей выборке связан с темами {self._join_list(derived_post_themes[:3])}. "
                 )
 
-        if "positive_analysis" in modes and positive_topics:
+        if not source_only and "positive_analysis" in modes and positive_topics:
             parts.append(
                 f"Скорее позитивно аудитория относится к темам {self._join_list(positive_topics[:3])}. "
             )
-        elif theme_reaction_map:
+        elif not source_only and theme_reaction_map:
             positive_themes = [item["theme"] for item in theme_reaction_map if item.get("reaction_tendency") == "скорее позитивная"]
             if positive_themes:
                 parts.append(
                     f"Скорее позитивно аудитория относится к темам {self._join_list(positive_themes[:3])}. "
                 )
 
-        if "negative_analysis" in modes and negative_topics:
+        if not source_only and "negative_analysis" in modes and negative_topics:
             parts.append(
                 f"Негативные эмоции заметнее всего связаны с темами {self._join_list(negative_topics[:3])}. "
             )
-        elif theme_reaction_map:
+        elif not source_only and theme_reaction_map:
             negative_themes = [item["theme"] for item in theme_reaction_map if item.get("reaction_tendency") == "скорее негативная"]
             if negative_themes:
                 parts.append(
                     f"Негативные эмоции заметнее всего связаны с темами {self._join_list(negative_themes[:3])}. "
                 )
 
-        if analyzed_comments > 0:
+        if not source_only and analyzed_comments > 0:
             parts.append(
                 f"Распределение тональности по релевантным комментариям: позитив {sentiment.get('positive_percent', 0)}%, "
                 f"негатив {sentiment.get('negative_percent', 0)}%, нейтрально {sentiment.get('neutral_percent', 0)}%. "
             )
-        else:
+        elif not source_only:
             parts.append(
                 "Релевантных комментариев по текущему запросу мало или они отсутствуют, поэтому вывод опирается прежде всего на метрики самих постов. "
             )
