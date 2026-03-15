@@ -68,7 +68,7 @@ class VkProvider(BaseProvider):
                 return result
 
             owner_id, post_id = self._parse_vk_post_id(result.external_source_id)
-            post = self._api_call("wall.getById", {"posts": f"wall{owner_id}_{post_id}"}, client=client)[0]
+            post = self._api_call("wall.getById", {"posts": f"{owner_id}_{post_id}"}, client=client)[0]
             result.external_source_id = f"{owner_id}_{post_id}"
             result.title = self._build_post_title(post)
             return result
@@ -86,7 +86,7 @@ class VkProvider(BaseProvider):
         with self._make_http_client() as client:
             if source.source_type == SourceTypeEnum.post:
                 owner_id, post_id = self._parse_vk_post_id(source.external_source_id)
-                items = self._api_call("wall.getById", {"posts": f"wall{owner_id}_{post_id}"}, client=client)
+                items = self._api_call("wall.getById", {"posts": f"{owner_id}_{post_id}"}, client=client)
             else:
                 owner_id = int(source.external_source_id)
                 items = self._fetch_all_wall_posts(owner_id, since_dt, until_dt, limit, client=client)
