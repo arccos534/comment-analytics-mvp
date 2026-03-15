@@ -13,6 +13,11 @@ from app.core.config import get_settings
 
 logger = logging.getLogger(__name__)
 
+SUMMARY_CACHE_VERSION = "v2"
+SUMMARY_PROMPT_VERSION = "structured-summary-v1"
+THEME_CACHE_VERSION = "v2"
+THEME_PROMPT_VERSION = "theme-labels-v1"
+
 GENERIC_TOPICS = {
     "Общее обсуждение",
     "Общая реакция",
@@ -380,18 +385,24 @@ class SummaryGenerator:
 
     def generate_summary_bundle(self, report_json: dict, prompt_text: str | None = None) -> tuple[dict, str]:
         summary_payload = self._build_summary_payload(report_json, prompt_text)
-        summary_text = self._generate_summary_text_from_payload(report_json, prompt_text, summary_payload)
+        llm_bundle = self._generate_llm_summary_bundle(report_json, prompt_text, summary_payload)
+        fallback_takeaways = self._build_takeaways(report_json, summary_payload, prompt_text)
+        summary_text = (llm_bundle or {}).get("overview") or self._build_fallback_summary(
+            report_json,
+            prompt_text,
+            summary_payload,
+        )
         return {
             "overview": summary_text,
-            "takeaways": self._build_takeaways(report_json, summary_payload, prompt_text),
+            "takeaways": (llm_bundle or {}).get("takeaways") or fallback_takeaways,
             "confidence_assessment": summary_payload.get("confidence_assessment", {}),
             "theme_reaction_map": summary_payload.get("theme_reaction_map", []),
             "focus_evidence": summary_payload.get("focus_evidence", []),
         }, summary_text
 
     def generate_summary_text(self, report_json: dict, prompt_text: str | None = None) -> str:
-        summary_payload = self._build_summary_payload(report_json, prompt_text)
-        return self._generate_summary_text_from_payload(report_json, prompt_text, summary_payload)
+        _bundle, summary_text = self.generate_summary_bundle(report_json, prompt_text=prompt_text)
+        return summary_text
 
     def _reasoning_options(self) -> dict:
         effort = (self.settings.openai_reasoning_effort or "").strip().lower()
@@ -420,52 +431,121 @@ class SummaryGenerator:
             },
         )
 
-    def _generate_summary_text_from_payload(
+    def _llm_summary_enabled(self, report_json: dict) -> bool:
+        analyzed_comments = int(report_json.get("stats", {}).get("analyzed_comments", 0) or 0)
+        total_posts = int(report_json.get("stats", {}).get("total_posts", 0) or 0)
+        return bool(
+            self.settings.llm_summary_enabled
+            and self.settings.openai_compatible_base_url
+            and self.settings.openai_compatible_api_key
+            and (analyzed_comments >= self.settings.llm_summary_min_comments or total_posts > 0)
+        )
+
+    def _generate_llm_summary_bundle(
         self,
         report_json: dict,
         prompt_text: str | None,
         summary_payload: dict,
-    ) -> str:
-        analyzed_comments = int(report_json.get("stats", {}).get("analyzed_comments", 0) or 0)
-        llm_enabled = (
-            self.settings.llm_summary_enabled
-            and self.settings.openai_compatible_base_url
-            and self.settings.openai_compatible_api_key
-            and analyzed_comments >= self.settings.llm_summary_min_comments
+    ) -> dict | None:
+        if not self._llm_summary_enabled(report_json):
+            return None
+
+        try:
+            cache_key = self._build_cache_key(summary_payload)
+            cached = self.redis.get(cache_key)
+            if cached:
+                return self._parse_summary_bundle(cached)
+
+            client = OpenAI(
+                base_url=self.settings.openai_compatible_base_url,
+                api_key=self.settings.openai_compatible_api_key,
+            )
+            completion = client.chat.completions.create(
+                model=self.settings.openai_compatible_model,
+                max_completion_tokens=700,
+                messages=[
+                    {"role": "system", "content": self._build_structured_summary_system_prompt()},
+                    {
+                        "role": "user",
+                        "content": json.dumps(summary_payload, ensure_ascii=False),
+                    },
+                ],
+                **self._completion_options(),
+            )
+            self._log_openai_completion(completion, "summary")
+            content = (completion.choices[0].message.content or "").strip()
+            bundle = self._parse_summary_bundle(content)
+            if bundle:
+                self.redis.setex(
+                    cache_key,
+                    self.settings.llm_summary_cache_ttl_seconds,
+                    json.dumps(bundle, ensure_ascii=False),
+                )
+                return bundle
+            if content:
+                return {"overview": content, "takeaways": []}
+        except Exception:
+            logger.exception("LLM summary generation failed")
+
+        return None
+
+    def _build_structured_summary_system_prompt(self) -> str:
+        return (
+            "You prepare the final analytics answer in Russian.\n"
+            "Return a valid JSON object only.\n"
+            "JSON schema:\n"
+            "{\n"
+            '  "overview": "string",\n'
+            '  "takeaways": ["string", "string"],\n'
+            '  "analysis_mode": "string"\n'
+            "}\n"
+            "Requirements:\n"
+            "- overview must directly answer the user prompt in the first sentence.\n"
+            "- adapt the answer to the actual request type: source/channel comparison, post/news ranking, theme analysis, comment reaction, mixed analysis.\n"
+            "- if analysis_request.theme_of_posts is present, rely only on theme-scoped evidence; do not pull unrelated stories.\n"
+            "- if analysis_request.analysis_axes indicates source_metrics without post_scope/comment_reaction, answer at source/channel level, not through one post.\n"
+            "- if prompt_mode contains most_discussed_news and top_discussed_posts is not empty, explicitly name the leading post.\n"
+            "- use focus_evidence and theme_reaction_map when they are relevant to the prompt.\n"
+            "- do not invent themes from raw word fragments or single noisy tokens.\n"
+            "- do not mention generic topics like 'general discussion' unless they are truly the only defensible conclusion.\n"
+            "- if confidence is low or the evidence is sparse, say that clearly and keep claims narrow.\n"
+            "- takeaways must contain 1 to 3 concise points, each useful and tied to the current prompt only.\n"
+            "- no markdown fences, no commentary outside JSON."
         )
 
-        if llm_enabled:
-            try:
-                cache_key = self._build_cache_key(summary_payload)
-                cached = self.redis.get(cache_key)
-                if cached:
-                    return cached
+    def _parse_summary_bundle(self, raw_value: str) -> dict | None:
+        text = (raw_value or "").strip()
+        if not text:
+            return None
 
-                client = OpenAI(
-                    base_url=self.settings.openai_compatible_base_url,
-                    api_key=self.settings.openai_compatible_api_key,
-                )
-                completion = client.chat.completions.create(
-                    model=self.settings.openai_compatible_model,
-                    max_completion_tokens=420,
-                    messages=[
-                        {"role": "system", "content": self._build_system_prompt()},
-                        {
-                            "role": "user",
-                            "content": json.dumps(summary_payload, ensure_ascii=False),
-                        },
-                    ],
-                    **self._completion_options(),
-                )
-                self._log_openai_completion(completion, "summary")
-                content = (completion.choices[0].message.content or "").strip()
-                if content:
-                    self.redis.setex(cache_key, self.settings.llm_summary_cache_ttl_seconds, content)
-                    return content
-            except Exception:
-                logger.exception("LLM summary generation failed")
+        candidate = text
+        start = text.find("{")
+        end = text.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            candidate = text[start : end + 1]
 
-        return self._build_fallback_summary(report_json, prompt_text, summary_payload)
+        try:
+            payload = json.loads(candidate)
+        except json.JSONDecodeError:
+            return None
+
+        overview = (payload.get("overview") or "").strip()
+        if not overview:
+            return None
+
+        takeaways: list[str] = []
+        for item in payload.get("takeaways", []) or []:
+            if not isinstance(item, str):
+                continue
+            normalized = item.strip()
+            if normalized and normalized not in takeaways:
+                takeaways.append(normalized)
+
+        return {
+            "overview": overview,
+            "takeaways": takeaways[:3],
+            "analysis_mode": str(payload.get("analysis_mode") or "").strip(),
+        }
 
     def _build_system_prompt(self) -> str:
         return (
@@ -500,13 +580,21 @@ class SummaryGenerator:
         digest = hashlib.sha256(
             json.dumps(summary_payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
         ).hexdigest()
-        return f"summary-cache:{self.settings.openai_compatible_model}:{digest}"
+        effort = (self.settings.openai_reasoning_effort or "").strip().lower() or "none"
+        return (
+            f"summary-cache:{SUMMARY_CACHE_VERSION}:{SUMMARY_PROMPT_VERSION}:"
+            f"{self.settings.openai_compatible_model}:{effort}:{digest}"
+        )
 
     def _build_theme_cache_key(self, payload: dict) -> str:
         digest = hashlib.sha256(
             json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
         ).hexdigest()
-        return f"theme-label-cache:{self.settings.openai_compatible_model}:{digest}"
+        effort = (self.settings.openai_reasoning_effort or "").strip().lower() or "none"
+        return (
+            f"theme-label-cache:{THEME_CACHE_VERSION}:{THEME_PROMPT_VERSION}:"
+            f"{self.settings.openai_compatible_model}:{effort}:{digest}"
+        )
 
     def _build_summary_payload(self, report_json: dict, prompt_text: str | None) -> dict:
         examples = report_json.get("examples", {})
@@ -555,6 +643,7 @@ class SummaryGenerator:
             "analysis_request": {
                 "theme_of_posts": (report_json.get("meta", {}).get("post_theme") or "").strip() or None,
                 "declared_theme_present": bool(declared_theme),
+                "has_explicit_scope": bool(declared_theme or report_json.get("meta", {}).get("post_keywords")),
                 "keywords_for_posts": report_json.get("meta", {}).get("post_keywords", []),
                 "user_prompt": (prompt_text or "").strip(),
                 "analysis_axes": analysis_axes,
@@ -567,6 +656,11 @@ class SummaryGenerator:
                 "platforms": report_json.get("meta", {}).get("platforms", []),
             },
             "coverage": report_json.get("stats", {}),
+            "selection_context": {
+                "matched_posts_count": len(matched_posts),
+                "theme_scoped_posts_count": len(theme_scoped_posts),
+                "selected_sources_count": len(source_comparison),
+            },
             "confidence_assessment": self._build_confidence_assessment(report_json),
             "sentiment_distribution": report_json.get("sentiment", {}),
             "derived_post_themes": derived_post_themes,

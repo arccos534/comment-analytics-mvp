@@ -538,6 +538,26 @@ class AnalyticsService:
             return topic_score >= 0.32
         return topic_score >= 0.18
 
+    def _is_source_metric_prompt(self, prompt_text: str | None) -> bool:
+        prompt = self._normalize_term(prompt_text or "")
+        if not prompt:
+            return False
+        source_roots = {
+            "РєР°РЅР°Р»",
+            "СЃРѕРѕР±С‰РµСЃС‚РІ",
+            "РёСЃС‚РѕС‡РЅРёРє",
+            "Р°СѓРґРёС‚РѕСЂ",
+            "РІРѕРІР»РµС‡",
+            "Р°РєС‚РёРІРЅ",
+            "РѕС…РІР°С‚",
+            "РїРѕРґРїРёСЃС‡РёРє",
+            "СЂРµР°РєС†",
+            "Р»Р°Р№Рє",
+            "СЂРµРїРѕСЃС‚",
+            "РјРµС‚СЂРёРє",
+        }
+        return any(root in prompt for root in source_roots)
+
     def execute_run_sync(self, analysis_run_id: UUID) -> dict:
         run = self.analysis_repo.update_run_status(analysis_run_id, AnalysisRunStatusEnum.running)
         if not run:
@@ -560,45 +580,34 @@ class AnalyticsService:
                 source_ids=source_filters,
                 platforms=platform_filters,
             )
-            scoped_posts = [
-                {"post": post, "source": source}
-                for post, source in post_records
-                if self._matches_post_scope(
-                    post.post_text,
-                    run.theme,
-                    run.keywords_json or [],
-                    run.prompt_text,
-                )
-                and not self._is_advertising_post(post.post_text)
-            ]
-            if not scoped_posts:
-                # If prompt-only scoping yields no posts, keep the report usable by
-                # falling back to the filtered project slice instead of returning 0/0.
+            source_only_prompt = self._is_source_metric_prompt(run.prompt_text) and not (
+                (run.theme or "").strip() or (run.keywords_json or [])
+            )
+            if source_only_prompt:
                 scoped_posts = [
                     {"post": post, "source": source}
                     for post, source in post_records
                     if not self._is_advertising_post(post.post_text)
                 ]
-            scoped_records = [
-                record
-                for record in records
-                if self._matches_post_scope(
-                    record[1].post_text,
-                    run.theme,
-                    run.keywords_json or [],
-                    run.prompt_text,
-                )
-                and not self._is_advertising_post(record[1].post_text)
-            ]
-            if not scoped_records:
-                scoped_post_ids = {record["post"].id for record in scoped_posts}
-                scoped_records = [
-                    record
-                    for record in records
-                    if record[1].id in scoped_post_ids and not self._is_advertising_post(record[1].post_text)
+            else:
+                scoped_posts = [
+                    {"post": post, "source": source}
+                    for post, source in post_records
+                    if self._matches_post_scope(
+                        post.post_text,
+                        run.theme,
+                        run.keywords_json or [],
+                        run.prompt_text,
+                    )
+                    and not self._is_advertising_post(post.post_text)
                 ]
 
             scoped_post_ids = {record["post"].id for record in scoped_posts}
+            scoped_records = [
+                record
+                for record in records
+                if record[1].id in scoped_post_ids and not self._is_advertising_post(record[1].post_text)
+            ]
 
             enriched_comments: list[dict] = []
             for comment, post, source in scoped_records:
@@ -608,7 +617,7 @@ class AnalyticsService:
                     text=comment.text,
                     prompt_text=run.prompt_text,
                 )
-                if post.id in scoped_post_ids:
+                if post.id in scoped_post_ids and not source_only_prompt:
                     # Comments under a prompt-relevant post are part of the audience
                     # reaction even if the comment text does not repeat the prompt terms.
                     relevance_score = max(relevance_score, 0.2)

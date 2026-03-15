@@ -13,7 +13,7 @@ class ReportAggregator:
         selected_sources: list[dict] | None = None,
     ) -> dict:
         relevant_comments = [item for item in enriched_comments if item["relevance_score"] >= 0.05]
-        working_set = relevant_comments or enriched_comments
+        working_set = relevant_comments
         scoped_posts = scoped_posts or []
 
         sentiment_counter = Counter(item["sentiment"] for item in working_set)
