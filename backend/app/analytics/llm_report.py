@@ -644,7 +644,7 @@ class SummaryGenerator:
             "heuristic_themes": heuristic_themes,
             "posts": [
                 {
-                    "post_text": self._shorten(post.get("post_text") or "", limit=260),
+                    "post_text": self._prepare_post_text_for_theme_llm(post.get("post_text") or ""),
                     "comments_count": int(post.get("comments_count", 0) or 0),
                     "likes_count": int(post.get("likes_count", 0) or 0),
                     "reposts_count": int(post.get("reposts_count", 0) or 0),
@@ -674,12 +674,16 @@ class SummaryGenerator:
                     {
                         "role": "system",
                         "content": (
-                            "Ты выделяешь 3-6 человеческих тем по текстам новостей и постов. "
-                            "Возвращай только JSON-массив коротких названий тем на русском языке. "
-                            "Каждая тема должна быть нормальным названием сюжета, а не набором случайных слов. "
-                            "Не используй названия каналов, городов, служебные слова и мусорные словосочетания, "
-                            "если это не является сутью новости. "
-                            "Если пользовательский запрос задает конкретную тему, предпочитай темы, связанные с этим запросом."
+                            "You are naming themes for a Russian-language media analytics report. "
+                            "Return only a JSON array with 3 to 6 short Russian theme labels. "
+                            "Each label must be a clean editorial theme title, not a raw fragment of a headline. "
+                            "Use 2 to 5 words, prefer noun phrases, avoid imperative wording, avoid duplicates, "
+                            "avoid channel names, city names, filler words, dates, and generic words like post, news, discussion. "
+                            "If several posts describe the same story, merge them into one theme. "
+                            "Bad labels: '???????? ????????????? ????', '????????? ??????', '?????????? ???????'. "
+                            "Good labels: '????????? ???? ? ????????? ??????', '??????????? ? ?????? ?? ????', "
+                            "'??????????? ????????? ? ???????????'. "
+                            "If the request already contains a theme or focus, prefer themes directly related to that request."
                         ),
                     },
                     {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
@@ -699,6 +703,7 @@ class SummaryGenerator:
                         if cleaned and cleaned not in themes:
                             themes.append(cleaned)
                     if themes:
+                        themes = self._dedupe_theme_list(themes)
                         self.redis.setex(cache_key, self.settings.llm_summary_cache_ttl_seconds, json.dumps(themes, ensure_ascii=False))
                         return themes[:6]
         except Exception:
@@ -735,6 +740,8 @@ class SummaryGenerator:
     ) -> list[dict]:
         posts = matched_posts or top_popular_posts or top_unpopular_posts
         result: list[dict] = []
+        seen_signatures: list[set[str]] = []
+        used_leading_posts: set[str] = set()
         for theme in themes[:6]:
             matching = [post for post in posts if self._theme_matches_post(theme, post)]
             if not matching:
@@ -755,9 +762,18 @@ class SummaryGenerator:
                 ),
                 reverse=True,
             )[0]
+            theme_label = self._normalize_theme_for_display(theme, matching)
+            if not theme_label:
+                continue
+            leader_id = str(leader.get("post_id") or "")
+            signature = self._theme_signature(theme_label)
+            if leader_id and leader_id in used_leading_posts:
+                continue
+            if signature and any(self._theme_signatures_overlap(signature, existing) for existing in seen_signatures):
+                continue
             result.append(
                 {
-                    "theme": theme,
+                    "theme": theme_label,
                     "platform": leader.get("platform"),
                     "posts_count": len(matching),
                     "comments_count": comments_total,
@@ -771,6 +787,10 @@ class SummaryGenerator:
                     "leading_post": self._compact_post(leader),
                 }
             )
+            if signature:
+                seen_signatures.append(signature)
+            if leader_id:
+                used_leading_posts.add(leader_id)
         return result
 
     def _build_prompt_focus_evidence(
@@ -1140,7 +1160,7 @@ class SummaryGenerator:
 
         tokens = [
             token
-            for token in re.findall(r"[a-zа-я0-9-]{4,}", text)
+            for token in re.findall(r"[a-z?-?0-9-]{4,}", text)
             if self._is_theme_token(token) and token not in THEME_NOISE_TOKENS
         ]
         if not tokens:
@@ -1162,17 +1182,95 @@ class SummaryGenerator:
         phrase = self._titleize_phrase(phrase)
 
         weak_phrases = {
-            "Интернет подмосковье тоже",
-            "Подмосковье тоже",
-            "Отключать работать",
-            "Интернет подмосковье",
-            "Барнауле стабильно подслушано",
-            "Стабильно подслушано тусовки",
-            "Ввели талоны подслушано",
+            "???????? ??????????? ????",
+            "??????????? ????",
+            "????????? ????????",
+            "???????? ???????????",
+            "???????? ????????? ??????????",
+            "????????? ?????????? ???????",
+            "????? ?????? ??????????",
         }
         if phrase in weak_phrases:
             return None
         return phrase
+
+    def _normalize_theme_for_display(self, theme: str, matching_posts: list[dict]) -> str | None:
+        cleaned = self._normalize_single_theme(theme)
+        if not cleaned:
+            return None
+
+        if len(cleaned.split()) >= 2 and not any(self._looks_like_verb(token.lower()) for token in cleaned.split()):
+            return cleaned
+
+        corpus = " ".join(self._normalize_text(post.get("post_text") or "") for post in matching_posts)
+        for pattern, label in CANONICAL_THEME_PATTERNS:
+            if re.search(pattern, corpus):
+                return label
+
+        leader = matching_posts[0] if matching_posts else None
+        if not leader:
+            return cleaned
+
+        leader_text = self._prepare_post_text_for_theme_llm(leader.get("post_text") or "")
+        title = self._extract_title_phrase(leader_text)
+        title = self._normalize_single_theme(title or "")
+        return title or cleaned
+
+    def _prepare_post_text_for_theme_llm(self, text: str) -> str:
+        prepared = re.sub(r"https?://\S+|t\.me/\S+|vk\.com/\S+", " ", text)
+        prepared = re.sub(r"[@#]\S+", " ", prepared)
+        prepared = re.sub(r"[^\w\s.,!??-??-???-]", " ", prepared)
+        prepared = re.sub(r"\s+", " ", prepared).strip()
+        prepared = self._strip_theme_noise_suffix(prepared)
+        prepared = self._extract_title_phrase(prepared) or prepared
+        return self._shorten(prepared, limit=180)
+
+    def _strip_theme_noise_suffix(self, text: str) -> str:
+        tokens = text.split()
+        while tokens:
+            normalized = self._normalize_text(tokens[-1]).strip(".,!?")
+            if normalized in THEME_NOISE_TOKENS or normalized in POST_THEME_STOPWORDS:
+                tokens.pop()
+                continue
+            break
+        return " ".join(tokens).strip()
+
+    def _extract_title_phrase(self, text: str) -> str:
+        sentence = self._split_into_sentences(text)[0].strip()
+        sentence = re.sub(r"\s*[?-]\s*??????????.*$", "", sentence, flags=re.IGNORECASE)
+        sentence = re.sub(r"\s{2,}", " ", sentence).strip(" .,!?:;-")
+        if "," in sentence:
+            parts = [part.strip() for part in sentence.split(",") if part.strip()]
+            if parts:
+                sentence = max(parts, key=len)
+        return sentence
+
+    def _theme_signature(self, theme: str) -> set[str]:
+        return {
+            self._stem_token(token)
+            for token in re.findall(r"[a-z?-?0-9-]{4,}", self._normalize_text(theme))
+            if token not in POST_THEME_STOPWORDS and token not in THEME_NOISE_TOKENS
+        }
+
+    def _theme_signatures_overlap(self, left: set[str], right: set[str]) -> bool:
+        if not left or not right:
+            return False
+        overlap = left & right
+        if len(overlap) >= min(len(left), len(right)):
+            return True
+        return len(overlap) >= 2
+
+    def _dedupe_theme_list(self, themes: list[str]) -> list[str]:
+        ordered: list[str] = []
+        signatures: list[set[str]] = []
+        for theme in themes:
+            signature = self._theme_signature(theme)
+            if signature and any(self._theme_signatures_overlap(signature, existing) for existing in signatures):
+                continue
+            ordered.append(theme)
+            if signature:
+                signatures.append(signature)
+        return ordered
 
     def _split_into_sentences(self, text: str) -> list[str]:
         chunks = [chunk.strip() for chunk in re.split(r"[.!?…:\n\r]+", text) if chunk.strip()]
