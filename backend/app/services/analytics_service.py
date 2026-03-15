@@ -80,55 +80,7 @@ REPORT_TITLE_STOPWORDS = {
     "вопрос",
 }
 
-PROMPT_SCOPE_STOPWORDS = REPORT_TITLE_STOPWORDS | {
-    "РґСѓРјР°СЋС‚",
-    "РјРЅРµРЅРёРµ",
-    "РёРЅС‚РµСЂРµСЃ",
-    "РёРЅС‚РµСЂРµСЃРЅС‹Рµ",
-    "РёРЅС‚РµСЂРµСЃРЅРѕРµ",
-    "РІС‹Р·С‹РІР°РµС‚",
-    "РІС‹Р·С‹РІР°СЋС‚",
-    "РІС‹Р·РІР°Р»Рё",
-    "РІС‹Р·РІР°Р»Р°",
-    "РЅРµРіР°С‚РёРІ",
-    "РЅРµРіР°С‚РёРІРЅС‹Рµ",
-    "РїРѕР·РёС‚РёРІ",
-    "РїРѕР·РёС‚РёРІРЅС‹Рµ",
-    "СЌРјРѕС†РёРё",
-    "СЌРјРѕС†РёСЋ",
-    "СЃР°РјРѕР№",
-    "СЃР°РјР°СЏ",
-    "СЃР°РјС‹Р№",
-    "РѕР±СЃСѓР¶РґР°РµРјР°СЏ",
-    "РѕР±СЃСѓР¶РґР°РµРјРѕР№",
-    "РѕР±СЃСѓР¶РґР°РµРјСѓСЋ",
-    "РѕС‚РІРµС‚",
-    "РѕС‚РІРµС‚СЊ",
-    "РІС‹РІРѕРґ",
-}
-
-GENERIC_PROMPT_SCOPE_TERMS = {
-    "новость",
-    "новости",
-    "пост",
-    "посты",
-    "люди",
-    "думают",
-    "думать",
-    "была",
-    "были",
-    "самая",
-    "самой",
-    "самый",
-    "обсуждаемая",
-    "обсуждаемой",
-    "обсуждаемый",
-    "обсуждали",
-    "мнение",
-}
-
-
-PROMPT_SCOPE_STOPWORDS_V2 = {
+PROMPT_SCOPE_STOPWORDS = {
     "проанализируй",
     "проанализировать",
     "анализ",
@@ -193,26 +145,6 @@ PROMPT_SCOPE_STOPWORDS_V2 = {
     "обсуждаемую",
     "обсуждаемый",
     "обсуждали",
-}
-
-GENERIC_PROMPT_SCOPE_TERMS_V2 = {
-    "новость",
-    "новости",
-    "пост",
-    "посты",
-    "люди",
-    "думают",
-    "думать",
-    "была",
-    "были",
-    "самая",
-    "самой",
-    "самый",
-    "обсуждаемая",
-    "обсуждаемой",
-    "обсуждаемый",
-    "обсуждали",
-    "мнение",
 }
 
 GENERIC_THEME_SCOPE_TERMS = {
@@ -426,7 +358,7 @@ class AnalyticsService:
         tokens = re.findall(r"[a-zа-я0-9-]{4,}", self._normalize_term(values))
         ordered: list[str] = []
         for token in tokens:
-            if token in PROMPT_SCOPE_STOPWORDS_V2 or token in GENERIC_THEME_SCOPE_TERMS:
+            if token in PROMPT_SCOPE_STOPWORDS or token in GENERIC_THEME_SCOPE_TERMS:
                 continue
             if token not in ordered:
                 ordered.append(token)
@@ -434,19 +366,6 @@ class AnalyticsService:
 
     def _extract_prompt_scope_terms(self, prompt_text: str | None) -> list[str]:
         return extract_shared_prompt_scope_terms(prompt_text)
-
-        prompt = self._normalize_term(prompt_text or "")
-        if not prompt:
-            return []
-
-        tokens = re.findall(r"[a-zа-я0-9-]{4,}", prompt)
-        ordered: list[str] = []
-        for token in tokens:
-            if token in PROMPT_SCOPE_STOPWORDS_V2:
-                continue
-            if token not in ordered:
-                ordered.append(token)
-        return ordered[:8]
 
     def _matches_prompt_scope(self, post_text: str | None, prompt_text: str | None) -> bool:
         text = (post_text or "").strip()
@@ -547,25 +466,6 @@ class AnalyticsService:
 
     def _is_source_metric_prompt(self, prompt_text: str | None) -> bool:
         return build_shared_prompt_intent(prompt_text, has_explicit_scope=False).source_only
-
-        prompt = self._normalize_term(prompt_text or "")
-        if not prompt:
-            return False
-        source_roots = {
-            "РєР°РЅР°Р»",
-            "СЃРѕРѕР±С‰РµСЃС‚РІ",
-            "РёСЃС‚РѕС‡РЅРёРє",
-            "Р°СѓРґРёС‚РѕСЂ",
-            "РІРѕРІР»РµС‡",
-            "Р°РєС‚РёРІРЅ",
-            "РѕС…РІР°С‚",
-            "РїРѕРґРїРёСЃС‡РёРє",
-            "СЂРµР°РєС†",
-            "Р»Р°Р№Рє",
-            "СЂРµРїРѕСЃС‚",
-            "РјРµС‚СЂРёРє",
-        }
-        return any(root in prompt for root in source_roots)
 
     def execute_run_sync(self, analysis_run_id: UUID) -> dict:
         run = self.analysis_repo.update_run_status(analysis_run_id, AnalysisRunStatusEnum.running)
