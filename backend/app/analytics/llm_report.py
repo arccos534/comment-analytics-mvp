@@ -407,6 +407,12 @@ class SummaryGenerator:
         ).hexdigest()
         return f"summary-cache:{self.settings.openai_compatible_model}:{digest}"
 
+    def _build_theme_cache_key(self, payload: dict) -> str:
+        digest = hashlib.sha256(
+            json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
+        ).hexdigest()
+        return f"theme-label-cache:{self.settings.openai_compatible_model}:{digest}"
+
     def _build_summary_payload(self, report_json: dict, prompt_text: str | None) -> dict:
         examples = report_json.get("examples", {})
         posts = report_json.get("posts", {})
@@ -426,10 +432,18 @@ class SummaryGenerator:
             if (topic.get("name") or "").strip() not in GENERIC_TOPICS
         ][: self.settings.llm_summary_max_topics]
 
-        derived_post_themes = self._extract_post_theme_candidates(
+        heuristic_post_themes = self._extract_post_theme_candidates(
             matched_posts + top_popular + top_unpopular,
             prompt_text=prompt_text,
             declared_theme=(report_json.get("meta", {}).get("post_theme") or "").strip() or None,
+        )
+        derived_post_themes = self._extract_post_themes_with_llm(
+            matched_posts=matched_posts,
+            top_popular=top_popular,
+            top_unpopular=top_unpopular,
+            prompt_text=prompt_text,
+            declared_theme=(report_json.get("meta", {}).get("post_theme") or "").strip() or None,
+            heuristic_themes=heuristic_post_themes,
         )
         prompt_mode = self._infer_prompt_mode(prompt_text)
         prompt_focus_terms = self._extract_prompt_focus_terms(prompt_text)
@@ -451,6 +465,7 @@ class SummaryGenerator:
             "confidence_assessment": self._build_confidence_assessment(report_json),
             "sentiment_distribution": report_json.get("sentiment", {}),
             "derived_post_themes": derived_post_themes,
+            "heuristic_post_themes": heuristic_post_themes,
             "theme_reaction_map": self._build_theme_reaction_map(
                 derived_post_themes,
                 matched_posts,
@@ -482,6 +497,91 @@ class SummaryGenerator:
             "top_popular_posts": [self._compact_post(post) for post in top_popular],
             "top_unpopular_posts": [self._compact_post(post) for post in top_unpopular],
         }
+
+    def _extract_post_themes_with_llm(
+        self,
+        matched_posts: list[dict],
+        top_popular: list[dict],
+        top_unpopular: list[dict],
+        prompt_text: str | None,
+        declared_theme: str | None,
+        heuristic_themes: list[str],
+    ) -> list[str]:
+        llm_enabled = (
+            self.settings.llm_summary_enabled
+            and self.settings.openai_compatible_base_url
+            and self.settings.openai_compatible_api_key
+        )
+        posts = (matched_posts + top_popular + top_unpopular)[:8]
+        if not llm_enabled or not posts:
+            return heuristic_themes
+
+        payload = {
+            "prompt_text": (prompt_text or "").strip(),
+            "declared_theme": declared_theme,
+            "heuristic_themes": heuristic_themes,
+            "posts": [
+                {
+                    "post_text": self._shorten(post.get("post_text") or "", limit=260),
+                    "comments_count": int(post.get("comments_count", 0) or 0),
+                    "likes_count": int(post.get("likes_count", 0) or 0),
+                    "reposts_count": int(post.get("reposts_count", 0) or 0),
+                }
+                for post in posts
+            ],
+        }
+        cache_key = self._build_theme_cache_key(payload)
+        cached = self.redis.get(cache_key)
+        if cached:
+            try:
+                value = json.loads(cached)
+                if isinstance(value, list):
+                    return [item for item in value if isinstance(item, str)][:6] or heuristic_themes
+            except json.JSONDecodeError:
+                pass
+
+        try:
+            client = OpenAI(
+                base_url=self.settings.openai_compatible_base_url,
+                api_key=self.settings.openai_compatible_api_key,
+            )
+            completion = client.chat.completions.create(
+                model=self.settings.openai_compatible_model,
+                temperature=0,
+                max_completion_tokens=180,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "Ты выделяешь 3-6 человеческих тем по текстам новостей и постов. "
+                            "Возвращай только JSON-массив коротких названий тем на русском языке. "
+                            "Каждая тема должна быть нормальным названием сюжета, а не набором случайных слов. "
+                            "Не используй названия каналов, городов, служебные слова и мусорные словосочетания, "
+                            "если это не является сутью новости. "
+                            "Если пользовательский запрос задает конкретную тему, предпочитай темы, связанные с этим запросом."
+                        ),
+                    },
+                    {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
+                ],
+            )
+            content = (completion.choices[0].message.content or "").strip()
+            if content:
+                parsed = json.loads(content)
+                if isinstance(parsed, list):
+                    themes = []
+                    for item in parsed:
+                        if not isinstance(item, str):
+                            continue
+                        cleaned = self._normalize_single_theme(item)
+                        if cleaned and cleaned not in themes:
+                            themes.append(cleaned)
+                    if themes:
+                        self.redis.setex(cache_key, self.settings.llm_summary_cache_ttl_seconds, json.dumps(themes, ensure_ascii=False))
+                        return themes[:6]
+        except Exception:
+            logger.exception("LLM theme extraction failed")
+
+        return heuristic_themes
 
     def _build_confidence_assessment(self, report_json: dict) -> dict:
         stats = report_json.get("stats", {})

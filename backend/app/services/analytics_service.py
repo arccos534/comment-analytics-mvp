@@ -538,6 +538,14 @@ class AnalyticsService:
                 )
                 and not self._is_advertising_post(post.post_text)
             ]
+            if not scoped_posts:
+                # If prompt-only scoping yields no posts, keep the report usable by
+                # falling back to the filtered project slice instead of returning 0/0.
+                scoped_posts = [
+                    {"post": post, "source": source}
+                    for post, source in post_records
+                    if not self._is_advertising_post(post.post_text)
+                ]
             scoped_records = [
                 record
                 for record in records
@@ -549,6 +557,15 @@ class AnalyticsService:
                 )
                 and not self._is_advertising_post(record[1].post_text)
             ]
+            if not scoped_records:
+                scoped_post_ids = {record["post"].id for record in scoped_posts}
+                scoped_records = [
+                    record
+                    for record in records
+                    if record[1].id in scoped_post_ids and not self._is_advertising_post(record[1].post_text)
+                ]
+
+            scoped_post_ids = {record["post"].id for record in scoped_posts}
 
             enriched_comments: list[dict] = []
             for comment, post, source in scoped_records:
@@ -558,6 +575,10 @@ class AnalyticsService:
                     text=comment.text,
                     prompt_text=run.prompt_text,
                 )
+                if post.id in scoped_post_ids:
+                    # Comments under a prompt-relevant post are part of the audience
+                    # reaction even if the comment text does not repeat the prompt terms.
+                    relevance_score = max(relevance_score, 0.2)
                 sentiment_result = self.sentiment.analyze(comment.text)
                 self.analysis_repo.upsert_comment_analysis(
                     comment_id=comment.id,
