@@ -17,6 +17,9 @@ class ReportAggregator:
                 "post_url": "",
                 "post_text": None,
                 "platform": None,
+                "source_id": None,
+                "source_title": None,
+                "source_url": None,
                 "relevant_comments_count": 0,
                 "positive_relevant_comments_count": 0,
                 "negative_relevant_comments_count": 0,
@@ -36,6 +39,9 @@ class ReportAggregator:
             bucket["post_url"] = post.post_url
             bucket["post_text"] = post.post_text
             bucket["platform"] = getattr(source.platform, "value", str(source.platform))
+            bucket["source_id"] = str(source.id)
+            bucket["source_title"] = source.title
+            bucket["source_url"] = source.source_url
             bucket["relevant_comments_count"] += 1
             sentiment = item["sentiment"]
             if sentiment in {"positive", "negative", "neutral"}:
@@ -53,6 +59,9 @@ class ReportAggregator:
             bucket["post_url"] = post.post_url
             bucket["post_text"] = post.post_text
             bucket["platform"] = getattr(source.platform, "value", str(source.platform))
+            bucket["source_id"] = str(source.id)
+            bucket["source_title"] = source.title
+            bucket["source_url"] = source.source_url
             bucket["platform_comments_count"] = max(bucket["platform_comments_count"], getattr(post, "comments_count", 0))
             bucket["likes_count"] = getattr(post, "likes_count", 0)
             bucket["reposts_count"] = getattr(post, "reposts_count", 0)
@@ -104,6 +113,9 @@ class ReportAggregator:
                 "post_url": value["post_url"],
                 "post_text": value["post_text"],
                 "platform": value["platform"],
+                "source_id": value["source_id"],
+                "source_title": value["source_title"],
+                "source_url": value["source_url"],
                 "score": popularity_score(value),
                 "comments_count": value["platform_comments_count"],
                 "relevant_comments_count": value["relevant_comments_count"],
@@ -115,6 +127,72 @@ class ReportAggregator:
             }
             for value in post_scores.values()
         ]
+
+        source_scores: dict[str, dict] = defaultdict(
+            lambda: {
+                "source_id": None,
+                "source_title": None,
+                "source_url": None,
+                "platform": None,
+                "posts_count": 0,
+                "comments_count": 0,
+                "relevant_comments_count": 0,
+                "positive_relevant_comments_count": 0,
+                "negative_relevant_comments_count": 0,
+                "neutral_relevant_comments_count": 0,
+                "likes_count": 0,
+                "reposts_count": 0,
+            }
+        )
+
+        for item in post_items:
+            source_id = str(item.get("source_id") or "")
+            if not source_id:
+                continue
+            bucket = source_scores[source_id]
+            bucket["source_id"] = source_id
+            bucket["source_title"] = item.get("source_title")
+            bucket["source_url"] = item.get("source_url")
+            bucket["platform"] = item.get("platform")
+            bucket["posts_count"] += 1
+            bucket["comments_count"] += int(item.get("comments_count", 0) or 0)
+            bucket["relevant_comments_count"] += int(item.get("relevant_comments_count", 0) or 0)
+            bucket["positive_relevant_comments_count"] += int(item.get("positive_relevant_comments_count", 0) or 0)
+            bucket["negative_relevant_comments_count"] += int(item.get("negative_relevant_comments_count", 0) or 0)
+            bucket["neutral_relevant_comments_count"] += int(item.get("neutral_relevant_comments_count", 0) or 0)
+            bucket["likes_count"] += int(item.get("likes_count", 0) or 0)
+            bucket["reposts_count"] += int(item.get("reposts_count", 0) or 0)
+
+        source_items = []
+        for value in source_scores.values():
+            score = popularity_score(value)
+            source_items.append(
+                {
+                    "source_id": value["source_id"],
+                    "source_title": value["source_title"],
+                    "source_url": value["source_url"],
+                    "platform": value["platform"],
+                    "posts_count": value["posts_count"],
+                    "comments_count": value["comments_count"],
+                    "relevant_comments_count": value["relevant_comments_count"],
+                    "positive_relevant_comments_count": value["positive_relevant_comments_count"],
+                    "negative_relevant_comments_count": value["negative_relevant_comments_count"],
+                    "neutral_relevant_comments_count": value["neutral_relevant_comments_count"],
+                    "likes_count": value["likes_count"],
+                    "reposts_count": value["reposts_count"],
+                    "score": score,
+                }
+            )
+        source_items = sorted(
+            source_items,
+            key=lambda item: (
+                item["score"],
+                item["comments_count"],
+                item["likes_count"],
+                item["reposts_count"],
+            ),
+            reverse=True,
+        )
 
         matched_posts = sorted(
             post_items,
@@ -162,6 +240,9 @@ class ReportAggregator:
                 "matched": matched_posts,
                 "top_popular": popular_posts,
                 "top_unpopular": unpopular_posts,
+            },
+            "sources": {
+                "comparison": source_items,
             },
             "summary": {
                 "highlights": [],

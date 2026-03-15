@@ -419,6 +419,7 @@ class SummaryGenerator:
         matched_posts = (posts.get("matched", []) or [])[:8]
         top_popular = (posts.get("top_popular", []) or [])[:5]
         top_unpopular = (posts.get("top_unpopular", []) or [])[:5]
+        source_comparison = (report_json.get("sources", {}).get("comparison", []) or [])[:8]
         top_discussed = sorted(
             matched_posts,
             key=lambda post: (post.get("comments_count", 0), post.get("score", 0)),
@@ -479,6 +480,7 @@ class SummaryGenerator:
                 top_popular,
                 top_unpopular,
             ),
+            "source_comparison_map": source_comparison,
             "positive_signals": {
                 "patterns": report_json.get("insights", {}).get("liked_patterns", []),
                 "topics": self._extract_comment_signal_topics(report_json, "positive"),
@@ -703,6 +705,9 @@ class SummaryGenerator:
             (r"наиболее обсужда", "most_discussed_news"),
             (r"какая новость", "specific_news_answer"),
             (r"какие новости", "specific_news_answer"),
+            (r"в каком канале|какой канал|какое сообщество|какой источник", "source_comparison"),
+            (r"активн[а-я]* аудитори", "source_comparison"),
+            (r"сравн.*канал|сравн.*сообществ|сравн.*источник", "source_comparison"),
             (r"интерес|вовлеч|резонанс", "interest_analysis"),
             (r"негатив|эмоци|критик|возмущ|раздраж", "negative_analysis"),
             (r"позитив|нрав|одобр|поддерж", "positive_analysis"),
@@ -727,6 +732,10 @@ class SummaryGenerator:
         if "most_discussed_news" in modes:
             instructions.append(
                 "Определи конкретную новость или пост с наибольшим объемом обсуждения и объясни, по каким признакам она лидирует."
+            )
+        if "source_comparison" in modes:
+            instructions.append(
+                "Сравни каналы, сообщества или источники между собой и назови, где аудитория активнее по совокупности комментариев, реакций или лайков и репостов."
             )
         if "interest_analysis" in modes:
             instructions.append(
@@ -792,6 +801,15 @@ class SummaryGenerator:
                 [
                     "Назови конкретную новость или пост-лидер.",
                     "Объясни, почему именно этот сюжет стал самым обсуждаемым.",
+                ]
+            )
+        elif re.search(r"в каком канале|какой канал|какое сообщество|какой источник|активн[а-я]* аудитори|сравн.*канал|сравн.*сообществ|сравн.*источник", prompt):
+            response_shape = "source_comparison"
+            first_sentence_rule = "Сразу назови канал или сообщество с самой активной аудиторией и объясни, по каким метрикам он лидирует."
+            must_cover.extend(
+                [
+                    "Назови канал или сообщество-лидер.",
+                    "Сравни его с другими источниками по комментариям, реакциям или лайкам и репостам.",
                 ]
             )
         elif re.search(r"топ|рейтинг|какие новости|какие темы", prompt):
@@ -1183,6 +1201,7 @@ class SummaryGenerator:
         themes = payload.get("theme_reaction_map", []) or []
         focus_evidence = payload.get("focus_evidence", []) or []
         top_discussed_posts = payload.get("top_discussed_posts", []) or []
+        source_comparison = payload.get("source_comparison_map", []) or []
         request = payload.get("analysis_request", {}) or {}
         prompt_modes = set(request.get("prompt_mode", []) or [])
         prompt_focus_terms = request.get("prompt_focus_terms", []) or []
@@ -1194,6 +1213,25 @@ class SummaryGenerator:
             takeaways.append(
                 f"Выборка небольшая: {total_posts} постов и {analyzed_comments} релевантных комментариев, поэтому выводы предварительные."
             )
+
+        if "source_comparison" in prompt_modes and source_comparison:
+            lead_source = source_comparison[0]
+            metric_label = "реакций" if (lead_source.get("platform") or "").lower() == "telegram" else "лайков"
+            takeaways.append(
+                f"Самая активная аудитория сейчас у источника «{lead_source.get('source_title') or lead_source.get('source_url') or 'без названия'}»: "
+                f"{lead_source.get('comments_count', 0)} комментариев, {lead_source.get('likes_count', 0)} {metric_label} и "
+                f"{lead_source.get('reposts_count', 0)} репостов по {lead_source.get('posts_count', 0)} постам."
+            )
+            if len(source_comparison) > 1:
+                runner_up = source_comparison[1]
+                takeaways.append(
+                    f"Ближайший по активности источник — «{runner_up.get('source_title') or runner_up.get('source_url') or 'без названия'}»."
+                )
+            unique: list[str] = []
+            for item in takeaways:
+                if item and item not in unique:
+                    unique.append(item)
+            return unique[:3]
 
         if focus_evidence:
             lead = focus_evidence[0]
@@ -1274,6 +1312,7 @@ class SummaryGenerator:
         top_discussed_posts = payload["top_discussed_posts"]
         focus_evidence = payload.get("focus_evidence", [])
         theme_reaction_map = payload.get("theme_reaction_map", [])
+        source_comparison = payload.get("source_comparison_map", [])
 
         if analyzed_comments <= 0 and total_posts <= 0:
             return (
@@ -1282,6 +1321,21 @@ class SummaryGenerator:
             )
 
         parts: list[str] = [f"По запросу «{prompt}» по текущей выборке видна следующая картина. "]
+
+        if "source_comparison" in modes and source_comparison:
+            lead = source_comparison[0]
+            metric_label = "реакций" if (lead.get("platform") or "").lower() == "telegram" else "лайков"
+            parts.append(
+                f"Самая активная аудитория в текущей выборке у источника «{lead.get('source_title') or lead.get('source_url') or 'без названия'}»: "
+                f"по его постам набирается {lead.get('comments_count', 0)} комментариев, {lead.get('likes_count', 0)} {metric_label} "
+                f"и {lead.get('reposts_count', 0)} репостов. "
+            )
+            if len(source_comparison) > 1:
+                runner_up = source_comparison[1]
+                parts.append(
+                    f"Следом идет источник «{runner_up.get('source_title') or runner_up.get('source_url') or 'без названия'}», "
+                    f"поэтому лидерство видно не по одной новости, а по суммарной активности аудитории на уровне канала или сообщества. "
+                )
 
         if "most_discussed_news" in modes and top_discussed_posts:
             lead = top_discussed_posts[0]
