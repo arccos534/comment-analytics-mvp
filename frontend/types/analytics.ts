@@ -122,6 +122,7 @@ export interface ReportSummary {
   takeaways?: string[];
   analysis_mode?: AnalysisMode;
   primary_mode?: AnalysisMode;
+  prompt_modes?: string[];
   secondary_modes?: string[];
   analysis_axes?: string[];
   request_contract?: string[];

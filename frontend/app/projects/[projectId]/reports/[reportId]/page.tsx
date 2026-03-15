@@ -32,6 +32,9 @@ function getAnalysisMode(report: ReportSnapshot["report_json"]): AnalysisMode {
 
 function getPostSections(report: ReportSnapshot["report_json"], mode: AnalysisMode): PostSection[] {
   const postGroups = report.posts;
+  const promptModes = new Set(report.summary.prompt_modes || []);
+  const showSuccessTopBucket = promptModes.has("successful_posts_bucket");
+  const showSuccessBottomBucket = promptModes.has("underperforming_posts_bucket");
 
   if (mode === "source_comparison") {
     return [
@@ -48,7 +51,7 @@ function getPostSections(report: ReportSnapshot["report_json"], mode: AnalysisMo
       {
         title: "Лидеры по успешности",
         description: "Верхние 20% по просмотрам, реакциям и комментариям.",
-        posts: postGroups.success_top_bucket || [],
+        posts: showSuccessTopBucket ? postGroups.success_top_bucket || [] : [],
       },
     ];
   }
@@ -63,14 +66,14 @@ function getPostSections(report: ReportSnapshot["report_json"], mode: AnalysisMo
       {
         title: "Лидеры по просмотрам",
         description: "Посты с наибольшим охватом.",
-        posts: [...(postGroups.success_top_bucket || [])].sort(
+        posts: [...(postGroups.top_popular || [])].sort(
           (left, right) => Number(right.views_count || 0) - Number(left.views_count || 0)
         ),
       },
       {
         title: "Верхние 20% по успешности",
         description: "Самые сильные посты по совокупности доступных метрик.",
-        posts: postGroups.success_top_bucket || [],
+        posts: showSuccessTopBucket ? postGroups.success_top_bucket || [] : [],
       },
     ];
   }
@@ -90,7 +93,7 @@ function getPostSections(report: ReportSnapshot["report_json"], mode: AnalysisMo
       {
         title: "Нижние 20% по успешности",
         description: "Посты с самыми слабыми доступными метриками.",
-        posts: postGroups.success_bottom_bucket || [],
+        posts: showSuccessBottomBucket ? postGroups.success_bottom_bucket || [] : [],
       },
     ];
   }
@@ -223,7 +226,7 @@ export default function ReportPage({ params }: { params: { projectId: string; re
 
       {showPostPanels ? (
         <div className="grid gap-5 xl:grid-cols-3">
-          {postSections.map((section) => (
+          {postSections.filter((section) => section.posts.length > 0).map((section) => (
             <TopPostsCard
               key={section.title}
               title={section.title}

@@ -402,6 +402,7 @@ class SummaryGenerator:
             "takeaways": (llm_bundle or {}).get("takeaways") or fallback_takeaways,
             "analysis_mode": (llm_bundle or {}).get("analysis_mode") or request.get("primary_mode") or "topic_report",
             "primary_mode": request.get("primary_mode") or "topic_report",
+            "prompt_modes": request.get("prompt_mode") or [],
             "secondary_modes": request.get("secondary_modes") or [],
             "analysis_axes": request.get("analysis_axes") or [],
             "request_contract": request.get("request_contract") or [],
@@ -1876,7 +1877,7 @@ class SummaryGenerator:
                 takeaways.append(
                     f"Наиболее позитивная реакция заметна вокруг темы «{strongest_positive['theme']}»."
                 )
-        elif top_discussed_posts:
+        elif top_discussed_posts and "successful_posts_bucket" in prompt_modes:
             lead_post = top_discussed_posts[0]
             takeaways.append(
                 f"Наиболее обсуждаемым оказался пост «{lead_post['post_text']}» с {lead_post['comments_count']} комментариями."
@@ -2051,6 +2052,7 @@ class SummaryGenerator:
         primary_mode = request.get("primary_mode") or "topic_report"
         prompt_focus_terms = request.get("prompt_focus_terms", []) or []
 
+        matched_posts = payload.get("matched_posts", []) or []
         focus_evidence = payload.get("focus_evidence", []) or []
         source_comparison = payload.get("source_comparison_map", []) or []
         top_discussed_posts = payload.get("top_discussed_posts", []) or []
@@ -2066,15 +2068,36 @@ class SummaryGenerator:
             prompt_focus_terms,
         ) or payload.get("theme_reaction_map", []) or []
         style_gap = payload.get("style_gap", {}) or {}
+        wants_success_buckets = bool({"successful_posts_bucket", "underperforming_posts_bucket"} & prompt_modes)
 
         if request.get("theme_of_posts"):
             top_discussed_posts = payload.get("theme_scoped_posts", []) or top_discussed_posts
+
+        single_post = matched_posts[0] if len(matched_posts) == 1 else None
+        if single_post is None:
+            seen_post_keys: set[str] = set()
+            unique_posts: list[dict] = []
+            for post_group in (matched_posts, top_reacted_posts, top_viewed_posts, top_discussed_posts, top_success_posts):
+                for post in post_group:
+                    post_key = str(post.get("post_id") or post.get("post_url") or "")
+                    if not post_key or post_key in seen_post_keys:
+                        continue
+                    seen_post_keys.add(post_key)
+                    unique_posts.append(post)
+            if len(unique_posts) == 1:
+                single_post = unique_posts[0]
 
         takeaways: list[str] = []
 
         if confidence.get("level") == "low":
             takeaways.append(
                 f"Выборка небольшая: {total_posts} постов и {analyzed_comments} релевантных комментариев, поэтому выводы предварительные."
+            )
+
+        if single_post and primary_mode in {"theme_sentiment", "topic_report", "mixed"}:
+            metrics_priority = "comments" if analyzed_comments > 0 else "success"
+            takeaways.append(
+                f"В центре текущего запроса один пост — «{single_post['post_text']}». По нему видно {self._format_post_metrics(single_post, priority=metrics_priority)}."
             )
 
         if primary_mode == "source_comparison" and source_comparison:
@@ -2120,10 +2143,10 @@ class SummaryGenerator:
             elif top_success_posts:
                 lead_post = sorted(top_success_posts, key=self._post_success_key, reverse=True)[0]
                 takeaways.append(
-                    f"В верхние 20% по успешности входит пост «{lead_post['post_text']}»: {self._format_post_metrics(lead_post, priority='success')}."
+                    f"Лидером по совокупности доступных метрик выглядит пост «{lead_post['post_text']}»: {self._format_post_metrics(lead_post, priority='success')}."
                 )
 
-            if bottom_success_posts:
+            if wants_success_buckets and bottom_success_posts:
                 weakest_post = sorted(bottom_success_posts, key=self._post_success_key)[0]
                 takeaways.append(
                     f"В нижние 20% по успешности попадает пост «{weakest_post['post_text']}»: {self._format_post_metrics(weakest_post, priority='success')}."
@@ -2145,7 +2168,7 @@ class SummaryGenerator:
                 takeaways.append(
                     f"Наименее успешным в текущем срезе выглядит пост «{weakest_post['post_text']}»: {self._format_post_metrics(weakest_post, priority='success')}."
                 )
-            if top_success_posts:
+            if wants_success_buckets and top_success_posts:
                 leader_post = sorted(top_success_posts, key=self._post_success_key, reverse=True)[0]
                 takeaways.append(
                     f"Для сравнения: лидер верхних 20% — «{leader_post['post_text']}» с метриками {self._format_post_metrics(leader_post, priority='success')}."
@@ -2186,7 +2209,7 @@ class SummaryGenerator:
             )
 
         style_gap_explanation = self._build_style_gap_explanation(style_gap)
-        if style_gap_explanation and primary_mode in {"post_popularity", "post_underperformance", "mixed", "topic_report"}:
+        if style_gap_explanation and wants_success_buckets and primary_mode in {"post_popularity", "post_underperformance", "mixed", "topic_report"}:
             takeaways.append(style_gap_explanation)
 
         if not takeaways and prompt_text:
@@ -2206,6 +2229,7 @@ class SummaryGenerator:
         analyzed_comments = int(stats.get("analyzed_comments", 0) or 0)
         derived_post_themes = payload.get("derived_post_themes", []) or []
         theme_map = payload.get("prompt_related_theme_map", []) or payload.get("theme_reaction_map", []) or []
+        matched_posts = payload.get("matched_posts", []) or []
         focus_evidence = payload.get("focus_evidence", []) or []
         source_comparison = payload.get("source_comparison_map", []) or []
         top_discussed_posts = payload.get("top_discussed_posts", []) or []
@@ -2217,6 +2241,21 @@ class SummaryGenerator:
         bottom_success_posts = payload.get("bottom_success_posts", []) or []
         style_gap = payload.get("style_gap", {}) or {}
         confidence = payload.get("confidence_assessment", {}) or {}
+        wants_success_buckets = bool({"successful_posts_bucket", "underperforming_posts_bucket"} & prompt_modes)
+
+        single_post = matched_posts[0] if len(matched_posts) == 1 else None
+        if single_post is None:
+            seen_post_keys: set[str] = set()
+            unique_posts: list[dict] = []
+            for post_group in (matched_posts, top_reacted_posts, top_viewed_posts, top_discussed_posts, top_success_posts):
+                for post in post_group:
+                    post_key = str(post.get("post_id") or post.get("post_url") or "")
+                    if not post_key or post_key in seen_post_keys:
+                        continue
+                    seen_post_keys.add(post_key)
+                    unique_posts.append(post)
+            if len(unique_posts) == 1:
+                single_post = unique_posts[0]
 
         if analyzed_comments <= 0 and total_posts <= 0 and not source_comparison:
             return (
@@ -2241,6 +2280,19 @@ class SummaryGenerator:
                 )
             paragraphs.append(direct)
 
+        elif primary_mode in {"theme_sentiment", "topic_report", "mixed"} and single_post:
+            if analyzed_comments > 0:
+                relevant_comments_count = int(
+                    single_post.get("relevant_comments_count", single_post.get("comments_count", 0)) or 0
+                )
+                paragraphs.append(
+                    f"В центре текущего запроса один пост — «{single_post['post_text']}». По нему найдено {relevant_comments_count} релевантных комментариев, и распределение реакции аудитории разберем ниже."
+                )
+            else:
+                paragraphs.append(
+                    f"В центре текущего запроса один пост — «{single_post['post_text']}». По нему пока есть только метрики самой публикации: {self._format_post_metrics(single_post, priority='success')}."
+                )
+
         elif primary_mode == "post_popularity":
             if ("most_reacted_post" in prompt_modes or "highest_reactions" in prompt_modes) and top_reacted_posts:
                 lead = sorted(top_reacted_posts, key=self._post_reaction_key, reverse=True)[0]
@@ -2263,11 +2315,11 @@ class SummaryGenerator:
             elif top_success_posts:
                 lead = sorted(top_success_posts, key=self._post_success_key, reverse=True)[0]
                 paragraphs.append(
-                    f"Лидером по успешности в текущем срезе выглядит пост «{lead['post_text']}». "
+                    f"Лидером по совокупности доступных метрик выглядит пост «{lead['post_text']}». "
                     f"Он собрал {self._format_post_metrics(lead, priority='success')}."
                 )
 
-            if bottom_success_posts:
+            if wants_success_buckets and bottom_success_posts:
                 weakest = sorted(bottom_success_posts, key=self._post_success_key)[0]
                 paragraphs.append(
                     f"В нижние 20% по успешности попадает пост «{weakest['post_text']}» с метриками {self._format_post_metrics(weakest, priority='success')}."
@@ -2290,7 +2342,7 @@ class SummaryGenerator:
                     f"Наименее успешным постом в текущем срезе выглядит «{weakest['post_text']}». "
                     f"У него {self._format_post_metrics(weakest, priority='success')}."
                 )
-            if top_success_posts:
+            if wants_success_buckets and top_success_posts:
                 leader = sorted(top_success_posts, key=self._post_success_key, reverse=True)[0]
                 paragraphs.append(
                     f"Для сравнения, лидер верхних 20% выглядит как «{leader['post_text']}» с метриками {self._format_post_metrics(leader, priority='success')}."
@@ -2354,7 +2406,7 @@ class SummaryGenerator:
                 f"Среди тематических сюжетов сильнее всего выделяется «{strongest_theme['theme']}»."
             )
 
-        if primary_mode in {"post_popularity", "post_underperformance", "mixed", "topic_report"}:
+        if wants_success_buckets and primary_mode in {"post_popularity", "post_underperformance", "mixed", "topic_report"}:
             style_gap_explanation = self._build_style_gap_explanation(style_gap)
             if style_gap_explanation:
                 paragraphs.append(style_gap_explanation)

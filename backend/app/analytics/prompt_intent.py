@@ -275,6 +275,7 @@ COMMENT_REACTION_TERMS = {
 
 RAW_MODE_PATTERNS: list[tuple[str, str]] = [
     (r"(excel|эксель|xlsx|таблиц[ауыое]|выгрузк[ауыи])", "excel_export"),
+    (r"(какую|какая|что).*(реакц|думают|воспринимают).*(новость|пост|публикац)", "theme_sentiment"),
     (r"сам[а-я]* обсужда|наиболее обсужда", "most_discussed_news"),
     (r"(больше всего|наибольш[а-я]*|максимальн[а-я]*).*(реакц|лайк)", "most_reacted_post"),
     (r"(реакц|лайк).*(больше всего|наибольш[а-я]*|максимальн[а-я]*)", "most_reacted_post"),
@@ -284,9 +285,11 @@ RAW_MODE_PATTERNS: list[tuple[str, str]] = [
     (r"(реакц|лайк).*(меньше всего|наименьш[а-я]*|минимальн[а-я]*|худш[а-я]*|слаб[а-я]*)", "least_reacted_post"),
     (r"(меньше всего|наименьш[а-я]*|минимальн[а-я]*|худш[а-я]*|слаб[а-я]*).*(просмотр|охват)", "least_viewed_post"),
     (r"(просмотр|охват).*(меньше всего|наименьш[а-я]*|минимальн[а-я]*|худш[а-я]*|слаб[а-я]*)", "least_viewed_post"),
-    (r"(успешн|популярн).*(20%|20 процентов|верхн)", "successful_posts_bucket"),
+    (r"(успешн|популярн).*(20%|20 процентов|верхн|n процентов|процент[а-я]* самых)", "successful_posts_bucket"),
+    ("(\\d+\\s*%|\\d+\\s*процент[а-я]*|n процентов).*(успешн|популярн).*(пост|публикац)", "successful_posts_bucket"),
     (r"(наиболее|самые|лучшие).*(успешн|популярн).*(пост|публикац)", "successful_posts_bucket"),
-    (r"(неуспешн|непопулярн|слаб[а-я]*|худш[а-я]*).*(20%|20 процентов|нижн)", "underperforming_posts_bucket"),
+    (r"(неуспешн|непопулярн|слаб[а-я]*|худш[а-я]*).*(20%|20 процентов|нижн|n процентов|процент[а-я]* самых)", "underperforming_posts_bucket"),
+    ("(\\d+\\s*%|\\d+\\s*процент[а-я]*|n процентов).*(неуспешн|непопулярн|слаб[а-я]*|худш[а-я]*).*(пост|публикац)", "underperforming_posts_bucket"),
     (r"(наименее|худшие|слабые).*(успешн|популярн|пост|публикац)", "underperforming_posts_bucket"),
     (r"в каком канале|какой канал|какое сообщество|какой источник", "source_comparison"),
     (r"активн[а-я]* аудитори", "source_comparison"),
@@ -496,6 +499,7 @@ def infer_request_contract(
     primary = primary_mode or determine_primary_mode(raw_modes, axes, has_explicit_scope=False)
     secondary = secondary_modes or []
     instructions: list[str] = []
+    wants_success_buckets = bool({"successful_posts_bucket", "underperforming_posts_bucket"} & set(raw_modes))
 
     if primary == "source_comparison":
         instructions.extend(
@@ -555,7 +559,7 @@ def infer_request_contract(
         instructions.append("Отвечай в рамках указанного периода, а не по всей истории источников.")
     if "comparison" in secondary and primary != "source_comparison":
         instructions.append("Покажи различия между лидерами и аутсайдерами, а не только перечисли их.")
-    if primary in {"post_popularity", "post_underperformance"}:
+    if wants_success_buckets:
         instructions.append("Если данных достаточно, выдели верхние и нижние 20% постов как лучшие и слабые группы.")
 
     return instructions
@@ -571,6 +575,7 @@ def build_answer_strategy(
     raw_modes = infer_prompt_mode(prompt_text)
     primary = primary_mode or determine_primary_mode(raw_modes, list(axes), has_explicit_scope=False)
     secondary = secondary_modes or determine_secondary_modes(raw_modes, primary, has_explicit_scope=False)
+    wants_success_buckets = bool({"successful_posts_bucket", "underperforming_posts_bucket"} & set(raw_modes))
 
     response_shape = "analysis_note"
     first_sentence_rule = "Начни с прямого ответа на пользовательский запрос."
@@ -600,20 +605,22 @@ def build_answer_strategy(
         must_cover.extend(
             [
                 "Назови лидеров по успеху.",
-                "Если данных хватает, покажи верхние 20% постов.",
                 "Объясни, какие темы и особенности подачи делают их сильнее.",
             ]
         )
+        if wants_success_buckets:
+            must_cover.append("Если данных хватает, покажи верхние 20% постов.")
     elif primary == "post_underperformance":
         response_shape = "ranked_posts"
         first_sentence_rule = "Начни со слабейших публикаций и коротко объясни, почему они отстают."
         must_cover.extend(
             [
                 "Назови аутсайдеров по успеху.",
-                "Если данных хватает, покажи нижние 20% постов.",
                 "Сравни их с более успешными публикациями.",
             ]
         )
+        if wants_success_buckets:
+            must_cover.append("Если данных хватает, покажи нижние 20% постов.")
     elif primary == "theme_sentiment":
         response_shape = "theme_map"
         first_sentence_rule = "Сразу назови темы с наиболее позитивной и наиболее негативной реакцией."
@@ -666,13 +673,29 @@ def build_prompt_intent(prompt_text: str | None, has_explicit_scope: bool = Fals
 
     primary_mode = determine_primary_mode(raw_modes, analysis_axes, has_explicit_scope)
     secondary_modes = determine_secondary_modes(raw_modes, primary_mode, has_explicit_scope)
+    focus_terms = extract_prompt_focus_terms(prompt_text)
     scope_terms = extract_prompt_scope_terms(prompt_text)
     meaningful_scope_terms = [term for term in scope_terms if term not in GENERIC_PROMPT_SCOPE_TERMS]
+    generic_reaction_pattern = re.search(
+        "(\\u043a\\u0430\\u043a\\u0443\\u044e|\\u043a\\u0430\\u043a\\u0430\\u044f|\\u0447\\u0442\\u043e).*(\\u0440\\u0435\\u0430\\u043a\\u0446|\\u0434\\u0443\\u043c\\u0430\\u044e\\u0442|\\u0432\\u043e\\u0441\\u043f\\u0440\\u0438\\u043d\\u0438\\u043c\\u0430\\u044e\\u0442).*(\\u043d\\u043e\\u0432\\u043e\\u0441\\u0442\\u044c|\\u043f\\u043e\\u0441\\u0442|\\u043f\\u0443\\u0431\\u043b\\u0438\\u043a\\u0430\\u0446)",
+        normalized_text,
+    )
+    generic_reaction_question = (
+        primary_mode == "theme_sentiment"
+        and not has_explicit_scope
+        and (
+            generic_reaction_pattern is not None
+            or (
+                not focus_terms
+                and not ({"theme_analysis", "theme_interest", "specific_news_answer"} & set(raw_modes))
+            )
+        )
+    )
     generic_scope = not meaningful_scope_terms or primary_mode in {
         "source_comparison",
         "post_popularity",
         "post_underperformance",
-    }
+    } or generic_reaction_question
     source_only = primary_mode == "source_comparison" and not has_explicit_scope and not meaningful_scope_terms
 
     return PromptIntent(
@@ -684,7 +707,7 @@ def build_prompt_intent(prompt_text: str | None, has_explicit_scope: bool = Fals
         secondary_modes=secondary_modes,
         request_contract=infer_request_contract(prompt_text, primary_mode, secondary_modes),
         answer_strategy=build_answer_strategy(prompt_text, analysis_axes, primary_mode, secondary_modes),
-        focus_terms=extract_prompt_focus_terms(prompt_text),
+        focus_terms=focus_terms,
         scope_terms=scope_terms,
         generic_scope=generic_scope,
         source_only=source_only,
