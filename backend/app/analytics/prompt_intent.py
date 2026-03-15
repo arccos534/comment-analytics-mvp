@@ -307,6 +307,98 @@ RAW_MODE_PATTERNS: list[tuple[str, str]] = [
     (r"какая новость|какой пост|какая публикация|какие новости", "specific_news_answer"),
 ]
 
+PROMPT_STOPWORDS.update(
+    {
+        "вызывает",
+        "вызывают",
+        "вызвала",
+        "вызвали",
+        "позитив",
+        "позитивный",
+        "позитивную",
+        "позитивно",
+        "негатив",
+        "негативный",
+        "негативную",
+        "негативно",
+        "эмоция",
+        "эмоции",
+        "реакция",
+        "реакцию",
+        "реакции",
+        "воспринимают",
+        "воспринимает",
+        "поддерживает",
+        "поддерживают",
+        "критикует",
+        "критикуют",
+        "одобряют",
+        "одобряет",
+        "почему",
+    }
+)
+
+GENERIC_PROMPT_SCOPE_TERMS.update(
+    {
+        "вызывает",
+        "вызывают",
+        "вызвала",
+        "вызвали",
+        "позитив",
+        "позитивный",
+        "позитивную",
+        "позитивно",
+        "негатив",
+        "негативный",
+        "негативную",
+        "негативно",
+        "эмоция",
+        "эмоции",
+        "реакция",
+        "реакцию",
+        "реакции",
+        "воспринимают",
+        "воспринимает",
+        "поддерживает",
+        "поддерживают",
+        "критикует",
+        "критикуют",
+        "одобряют",
+        "одобряет",
+        "почему",
+    }
+)
+
+COMMENT_REACTION_TERMS.update(
+    {
+        "позитивный",
+        "позитивную",
+        "позитивно",
+        "негативный",
+        "негативную",
+        "негативно",
+        "воспринимают",
+        "воспринимает",
+        "вызывает",
+        "вызывают",
+        "вызвала",
+        "вызвали",
+        "поддерживает",
+        "поддерживают",
+        "критикует",
+        "критикуют",
+        "одобряют",
+        "одобряет",
+    }
+)
+
+RAW_MODE_PATTERNS[:0] = [
+    (r"позитив\w*.*негатив\w*|негатив\w*.*позитив\w*", "negative_analysis"),
+    (r"позитив\w*.*негатив\w*|негатив\w*.*позитив\w*", "positive_analysis"),
+    (r"вызыва\w*.*позитив\w*|позитив\w*.*реакц\w*|воспринима\w*.*позитив\w*", "positive_analysis"),
+    (r"вызыва\w*.*негатив\w*|негатив\w*.*реакц\w*|воспринима\w*.*негатив\w*", "negative_analysis"),
+]
+
 PRIMARY_MODE_PRIORITY = [
     "excel_export",
     "source_comparison",
@@ -609,22 +701,23 @@ def determine_primary_mode(raw_modes: list[str], analysis_axes: list[str], has_e
         primary_candidates.append("source_comparison")
     if {"least_reacted_post", "least_viewed_post", "underperforming_posts_bucket"} & mode_set:
         primary_candidates.append("post_underperformance")
-    if {
+    ranking_modes = {
         "most_discussed_news",
         "most_reacted_post",
         "most_viewed_post",
         "successful_posts_bucket",
-        "specific_news_answer",
-    } & mode_set:
-        primary_candidates.append("post_popularity")
-    if {
+    }
+    sentiment_modes = {
         "negative_analysis",
         "positive_analysis",
         "support_analysis",
         "complaints_analysis",
         "concerns_analysis",
         "polarization_analysis",
-    } & mode_set:
+    }
+    if ranking_modes & mode_set or ("specific_news_answer" in mode_set and not (sentiment_modes & mode_set)):
+        primary_candidates.append("post_popularity")
+    if sentiment_modes & mode_set:
         primary_candidates.append("theme_sentiment")
     if "interest_analysis" in mode_set:
         primary_candidates.append("theme_interest")
