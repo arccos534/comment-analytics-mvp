@@ -399,6 +399,12 @@ class SummaryGenerator:
             return {}
         return {"reasoning_effort": effort}
 
+    def _completion_options(self) -> dict:
+        options = dict(self._reasoning_options())
+        if "reasoning_effort" not in options:
+            options["temperature"] = 0
+        return options
+
     def _log_openai_completion(self, completion, purpose: str) -> None:
         usage = getattr(completion, "usage", None)
         logger.info(
@@ -441,7 +447,6 @@ class SummaryGenerator:
                 )
                 completion = client.chat.completions.create(
                     model=self.settings.openai_compatible_model,
-                    temperature=0,
                     max_completion_tokens=420,
                     messages=[
                         {"role": "system", "content": self._build_system_prompt()},
@@ -450,7 +455,7 @@ class SummaryGenerator:
                             "content": json.dumps(summary_payload, ensure_ascii=False),
                         },
                     ],
-                    **self._reasoning_options(),
+                    **self._completion_options(),
                 )
                 self._log_openai_completion(completion, "summary")
                 content = (completion.choices[0].message.content or "").strip()
@@ -664,7 +669,6 @@ class SummaryGenerator:
             )
             completion = client.chat.completions.create(
                 model=self.settings.openai_compatible_model,
-                temperature=0,
                 max_completion_tokens=180,
                 messages=[
                     {
@@ -680,7 +684,7 @@ class SummaryGenerator:
                     },
                     {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
                 ],
-                **self._reasoning_options(),
+                **self._completion_options(),
             )
             self._log_openai_completion(completion, "theme_extraction")
             content = (completion.choices[0].message.content or "").strip()
