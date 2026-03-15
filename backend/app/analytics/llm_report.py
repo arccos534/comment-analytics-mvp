@@ -393,6 +393,27 @@ class SummaryGenerator:
         summary_payload = self._build_summary_payload(report_json, prompt_text)
         return self._generate_summary_text_from_payload(report_json, prompt_text, summary_payload)
 
+    def _reasoning_options(self) -> dict:
+        effort = (self.settings.openai_reasoning_effort or "").strip().lower()
+        if not effort:
+            return {}
+        return {"reasoning_effort": effort}
+
+    def _log_openai_completion(self, completion, purpose: str) -> None:
+        usage = getattr(completion, "usage", None)
+        logger.info(
+            "OpenAI completion succeeded",
+            extra={
+                "purpose": purpose,
+                "requested_model": self.settings.openai_compatible_model,
+                "response_model": getattr(completion, "model", None),
+                "reasoning_effort": self.settings.openai_reasoning_effort,
+                "prompt_tokens": getattr(usage, "prompt_tokens", None),
+                "completion_tokens": getattr(usage, "completion_tokens", None),
+                "total_tokens": getattr(usage, "total_tokens", None),
+            },
+        )
+
     def _generate_summary_text_from_payload(
         self,
         report_json: dict,
@@ -429,7 +450,9 @@ class SummaryGenerator:
                             "content": json.dumps(summary_payload, ensure_ascii=False),
                         },
                     ],
+                    **self._reasoning_options(),
                 )
+                self._log_openai_completion(completion, "summary")
                 content = (completion.choices[0].message.content or "").strip()
                 if content:
                     self.redis.setex(cache_key, self.settings.llm_summary_cache_ttl_seconds, content)
@@ -657,7 +680,9 @@ class SummaryGenerator:
                     },
                     {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
                 ],
+                **self._reasoning_options(),
             )
+            self._log_openai_completion(completion, "theme_extraction")
             content = (completion.choices[0].message.content or "").strip()
             if content:
                 parsed = json.loads(content)

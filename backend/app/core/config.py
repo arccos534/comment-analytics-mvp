@@ -39,7 +39,8 @@ class Settings(BaseSettings):
 
     openai_compatible_base_url: str | None = None
     openai_compatible_api_key: str | None = None
-    openai_compatible_model: str = "gpt-4o-mini"
+    openai_compatible_model: str = "gpt-5.4"
+    openai_reasoning_effort: str = "high"
     llm_summary_enabled: bool = False
     llm_summary_cache_ttl_seconds: int = 86400
     llm_summary_min_comments: int = 8
