@@ -102,9 +102,10 @@ class ReportAggregator:
         }
 
         def popularity_score(value: dict) -> float:
-            comments_score = value["platform_comments_count"] * 5
-            likes_score = value["likes_count"] * 2
-            reposts_score = value["reposts_count"] * 4
+            comments_base = int(value.get("platform_comments_count", value.get("comments_count", 0)) or 0)
+            likes_score = int(value.get("likes_count", 0) or 0) * 2
+            reposts_score = int(value.get("reposts_count", 0) or 0) * 4
+            comments_score = comments_base * 5
             return round(comments_score + likes_score + reposts_score, 2)
 
         post_items = [
