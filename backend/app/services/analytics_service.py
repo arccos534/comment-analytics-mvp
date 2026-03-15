@@ -74,6 +74,33 @@ REPORT_TITLE_STOPWORDS = {
     "вопрос",
 }
 
+PROMPT_SCOPE_STOPWORDS = REPORT_TITLE_STOPWORDS | {
+    "РґСѓРјР°СЋС‚",
+    "РјРЅРµРЅРёРµ",
+    "РёРЅС‚РµСЂРµСЃ",
+    "РёРЅС‚РµСЂРµСЃРЅС‹Рµ",
+    "РёРЅС‚РµСЂРµСЃРЅРѕРµ",
+    "РІС‹Р·С‹РІР°РµС‚",
+    "РІС‹Р·С‹РІР°СЋС‚",
+    "РІС‹Р·РІР°Р»Рё",
+    "РІС‹Р·РІР°Р»Р°",
+    "РЅРµРіР°С‚РёРІ",
+    "РЅРµРіР°С‚РёРІРЅС‹Рµ",
+    "РїРѕР·РёС‚РёРІ",
+    "РїРѕР·РёС‚РёРІРЅС‹Рµ",
+    "СЌРјРѕС†РёРё",
+    "СЌРјРѕС†РёСЋ",
+    "СЃР°РјРѕР№",
+    "СЃР°РјР°СЏ",
+    "СЃР°РјС‹Р№",
+    "РѕР±СЃСѓР¶РґР°РµРјР°СЏ",
+    "РѕР±СЃСѓР¶РґР°РµРјРѕР№",
+    "РѕР±СЃСѓР¶РґР°РµРјСѓСЋ",
+    "РѕС‚РІРµС‚",
+    "РѕС‚РІРµС‚СЊ",
+    "РІС‹РІРѕРґ",
+}
+
 
 class AnalyticsService:
     def __init__(self, db: Session) -> None:
@@ -193,6 +220,36 @@ class AnalyticsService:
     def _tokenize_scope(self, value: str) -> set[str]:
         return set(re.findall(r"[A-Za-zА-Яа-яЁё0-9-]{4,}", value.lower()))
 
+    def _extract_prompt_scope_terms(self, prompt_text: str | None) -> list[str]:
+        prompt = (prompt_text or "").strip().lower()
+        if not prompt:
+            return []
+
+        tokens = re.findall(r"[A-Za-zА-Яа-яЁё0-9-]{4,}", prompt)
+        ordered: list[str] = []
+        for token in tokens:
+            if token in PROMPT_SCOPE_STOPWORDS:
+                continue
+            if token not in ordered:
+                ordered.append(token)
+        return ordered[:8]
+
+    def _matches_prompt_scope(self, post_text: str | None, prompt_text: str | None) -> bool:
+        text = (post_text or "").strip()
+        if not text:
+            return False
+
+        prompt_terms = self._extract_prompt_scope_terms(prompt_text)
+        if not prompt_terms:
+            return True
+
+        lowered = text.lower()
+        overlap = sum(1 for token in prompt_terms if token in lowered)
+        if overlap >= 2 or (len(prompt_terms) <= 2 and overlap >= 1):
+            return True
+
+        return self.relevance.score(text, (prompt_text or "").strip()) >= 0.18
+
     def _is_advertising_post(self, post_text: str | None) -> bool:
         text = (post_text or "").strip().lower()
         if not text:
@@ -228,11 +285,17 @@ class AnalyticsService:
         )
         return links_count >= 2 or phone_count >= 1 or (links_count >= 1 and cta_markers >= 1)
 
-    def _matches_post_scope(self, post_text: str | None, theme: str | None, keywords: list[str] | None) -> bool:
+    def _matches_post_scope(
+        self,
+        post_text: str | None,
+        theme: str | None,
+        keywords: list[str] | None,
+        prompt_text: str | None = None,
+    ) -> bool:
         keywords = keywords or []
         has_post_scope = bool((theme or "").strip() or keywords)
         if not has_post_scope:
-            return True
+            return self._matches_prompt_scope(post_text, prompt_text)
 
         text = (post_text or "").strip()
         if not text:
@@ -271,7 +334,12 @@ class AnalyticsService:
             scoped_records = [
                 record
                 for record in records
-                if self._matches_post_scope(record[1].post_text, run.theme, run.keywords_json or [])
+                if self._matches_post_scope(
+                    record[1].post_text,
+                    run.theme,
+                    run.keywords_json or [],
+                    run.prompt_text,
+                )
                 and not self._is_advertising_post(record[1].post_text)
             ]
 
