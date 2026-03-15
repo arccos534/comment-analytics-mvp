@@ -1374,7 +1374,8 @@ class SummaryGenerator:
     def _prepare_post_text_for_theme_llm(self, text: str) -> str:
         prepared = re.sub(r"https?://\S+|t\.me/\S+|vk\.com/\S+", " ", text)
         prepared = re.sub(r"[@#]\S+", " ", prepared)
-        prepared = re.sub(r"[^\w\s.,!??-??-???-]", " ", prepared)
+        # Keep letters, digits, whitespace and a small safe set of punctuation.
+        prepared = re.sub(r"[^\w\s.,!?:;\-–—()]", " ", prepared)
         prepared = re.sub(r"\s+", " ", prepared).strip()
         prepared = self._strip_theme_noise_suffix(prepared)
         prepared = self._extract_title_phrase(prepared) or prepared
@@ -1392,7 +1393,8 @@ class SummaryGenerator:
 
     def _extract_title_phrase(self, text: str) -> str:
         sentence = self._split_into_sentences(text)[0].strip()
-        sentence = re.sub(r"\s*[?-]\s*??????????.*$", "", sentence, flags=re.IGNORECASE)
+        # Drop common source-name tails like " ... Подслушано тусовки" after a dash.
+        sentence = re.sub(r"\s+[—–-]\s+.*$", "", sentence)
         sentence = re.sub(r"\s{2,}", " ", sentence).strip(" .,!?:;-")
         if "," in sentence:
             parts = [part.strip() for part in sentence.split(",") if part.strip()]
