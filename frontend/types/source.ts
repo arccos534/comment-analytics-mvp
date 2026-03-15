@@ -10,6 +10,7 @@ export interface Source {
   source_url: string;
   external_source_id: string | null;
   title: string | null;
+  subscriber_count: number | null;
   status: SourceStatus;
   last_indexed_at: string | null;
   created_at: string;
@@ -26,6 +27,7 @@ export interface SourceValidationResult {
   reason: string | null;
   external_source_id: string | null;
   title: string | null;
+  subscriber_count: number | null;
 }
 
 export interface SourceBulkCreateResponse {

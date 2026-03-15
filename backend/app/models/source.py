@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import DateTime, Enum, ForeignKey, Index, String, Text, UniqueConstraint
+from sqlalchemy import DateTime, Enum, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin, UUIDMixin, UpdatedAtMixin
@@ -21,6 +21,7 @@ class Source(UUIDMixin, TimestampMixin, UpdatedAtMixin, Base):
     source_url: Mapped[str] = mapped_column(Text, nullable=False)
     external_source_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     title: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    subscriber_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     status: Mapped[SourceStatusEnum] = mapped_column(
         Enum(SourceStatusEnum, name="source_status_enum"), default=SourceStatusEnum.pending, nullable=False
     )

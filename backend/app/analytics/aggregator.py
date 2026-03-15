@@ -20,6 +20,7 @@ class ReportAggregator:
                 "source_id": None,
                 "source_title": None,
                 "source_url": None,
+                "source_subscriber_count": None,
                 "relevant_comments_count": 0,
                 "positive_relevant_comments_count": 0,
                 "negative_relevant_comments_count": 0,
@@ -42,6 +43,7 @@ class ReportAggregator:
             bucket["source_id"] = str(source.id)
             bucket["source_title"] = source.title
             bucket["source_url"] = source.source_url
+            bucket["source_subscriber_count"] = getattr(source, "subscriber_count", None)
             bucket["relevant_comments_count"] += 1
             sentiment = item["sentiment"]
             if sentiment in {"positive", "negative", "neutral"}:
@@ -62,6 +64,7 @@ class ReportAggregator:
             bucket["source_id"] = str(source.id)
             bucket["source_title"] = source.title
             bucket["source_url"] = source.source_url
+            bucket["source_subscriber_count"] = getattr(source, "subscriber_count", None)
             bucket["platform_comments_count"] = max(bucket["platform_comments_count"], getattr(post, "comments_count", 0))
             bucket["likes_count"] = getattr(post, "likes_count", 0)
             bucket["reposts_count"] = getattr(post, "reposts_count", 0)
@@ -117,6 +120,7 @@ class ReportAggregator:
                 "source_id": value["source_id"],
                 "source_title": value["source_title"],
                 "source_url": value["source_url"],
+                "source_subscriber_count": value["source_subscriber_count"],
                 "score": popularity_score(value),
                 "comments_count": value["platform_comments_count"],
                 "relevant_comments_count": value["relevant_comments_count"],
@@ -135,6 +139,7 @@ class ReportAggregator:
                 "source_title": None,
                 "source_url": None,
                 "platform": None,
+                "subscriber_count": None,
                 "posts_count": 0,
                 "comments_count": 0,
                 "relevant_comments_count": 0,
@@ -155,6 +160,7 @@ class ReportAggregator:
             bucket["source_title"] = item.get("source_title")
             bucket["source_url"] = item.get("source_url")
             bucket["platform"] = item.get("platform")
+            bucket["subscriber_count"] = item.get("source_subscriber_count")
             bucket["posts_count"] += 1
             bucket["comments_count"] += int(item.get("comments_count", 0) or 0)
             bucket["relevant_comments_count"] += int(item.get("relevant_comments_count", 0) or 0)
@@ -173,6 +179,7 @@ class ReportAggregator:
                     "source_title": value["source_title"],
                     "source_url": value["source_url"],
                     "platform": value["platform"],
+                    "subscriber_count": value["subscriber_count"],
                     "posts_count": value["posts_count"],
                     "comments_count": value["comments_count"],
                     "relevant_comments_count": value["relevant_comments_count"],

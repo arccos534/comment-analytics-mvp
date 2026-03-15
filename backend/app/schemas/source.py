@@ -22,6 +22,7 @@ class SourceValidationResult(BaseModel):
     reason: str | None = None
     external_source_id: str | None = None
     title: str | None = None
+    subscriber_count: int | None = None
 
 
 class SourceCreateItem(BaseModel):
@@ -40,6 +41,7 @@ class SourceResponse(ORMModel):
     source_url: str
     external_source_id: str | None
     title: str | None
+    subscriber_count: int | None
     status: SourceStatusEnum
     last_indexed_at: datetime | None
     created_at: datetime

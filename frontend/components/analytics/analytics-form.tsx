@@ -31,18 +31,23 @@ export function AnalyticsForm({ projectId, sources }: { projectId: string; sourc
     const run = await runAnalysis.mutateAsync({
       prompt_text: promptText,
       theme,
-      keywords: keywords.split(",").map((value) => value.trim()).filter(Boolean),
+      keywords: keywords
+        .split(",")
+        .map((value) => value.trim())
+        .filter(Boolean),
       period_from: periodFrom ? new Date(periodFrom).toISOString() : null,
       period_to: periodTo ? new Date(periodTo).toISOString() : null,
       platforms: platforms as ("telegram" | "vk")[],
-      source_ids: selectedSourceIds
+      source_ids: selectedSourceIds,
     });
     setLatestAnalysisRunId(run.id);
     router.push(`/projects/${projectId}/reports/${run.id}`);
   }
 
   function togglePlatform(platform: string) {
-    setPlatforms((current) => (current.includes(platform) ? current.filter((item) => item !== platform) : [...current, platform]));
+    setPlatforms((current) =>
+      current.includes(platform) ? current.filter((item) => item !== platform) : [...current, platform]
+    );
   }
 
   function toggleSource(sourceId: string) {
@@ -55,7 +60,10 @@ export function AnalyticsForm({ projectId, sources }: { projectId: string; sourc
     <Card className="bg-white/5">
       <CardHeader>
         <CardTitle>Generate report</CardTitle>
-        <CardDescription>Тема и keywords относятся к постам и новостям. Prompt задает фокус анализа комментариев.</CardDescription>
+        <CardDescription>
+          Тема и keywords относятся к постам и новостям. Prompt задает фокус анализа комментариев и
+          источников.
+        </CardDescription>
       </CardHeader>
       <CardContent className="grid gap-6 lg:grid-cols-2">
         <div className="space-y-4">
@@ -78,18 +86,23 @@ export function AnalyticsForm({ projectId, sources }: { projectId: string; sourc
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="prompt">Prompt for comment analysis</Label>
+            <Label htmlFor="prompt">Prompt for source and comment analysis</Label>
             <Input
               id="prompt"
               value={promptText}
               onChange={(event) => setPromptText(event.target.value)}
-              placeholder="Например: найди основные претензии и позитивные сигналы"
+              placeholder="Например: сравни активность источников и реакцию аудитории на их новости"
             />
           </div>
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2">
               <Label htmlFor="period-from">From</Label>
-              <Input id="period-from" type="date" value={periodFrom} onChange={(event) => setPeriodFrom(event.target.value)} />
+              <Input
+                id="period-from"
+                type="date"
+                value={periodFrom}
+                onChange={(event) => setPeriodFrom(event.target.value)}
+              />
             </div>
             <div className="space-y-2">
               <Label htmlFor="period-to">To</Label>

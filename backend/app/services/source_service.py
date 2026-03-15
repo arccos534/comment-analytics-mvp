@@ -73,6 +73,7 @@ class SourceService:
                 source_url=result.normalized_url,
                 external_source_id=result.external_source_id,
                 title=result.title,
+                subscriber_count=result.subscriber_count,
                 status=SourceStatusEnum.pending,
             )
             created.append(source)

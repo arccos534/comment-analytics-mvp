@@ -21,9 +21,11 @@ try:
     from telethon import TelegramClient
     from telethon.errors import ChannelPrivateError, MsgIdInvalidError, RPCError, UsernameInvalidError, UsernameNotOccupiedError
     from telethon.sessions import StringSession
+    from telethon.tl.functions.channels import GetFullChannelRequest
 except Exception:  # pragma: no cover
     TelegramClient = None
     StringSession = None
+    GetFullChannelRequest = None
     ChannelPrivateError = MsgIdInvalidError = RPCError = UsernameInvalidError = UsernameNotOccupiedError = Exception
 
 
@@ -74,6 +76,7 @@ class TelegramProvider(BaseProvider):
                 entity = await client.get_entity(result.external_source_id or url)
                 result.external_source_id = getattr(entity, "username", None) or result.external_source_id
                 result.title = getattr(entity, "title", None) or result.title
+                result.subscriber_count = await self._extract_subscriber_count(client, entity)
                 return result
 
             slug, post_id = self._parse_post_url(result.external_source_id)
@@ -84,6 +87,18 @@ class TelegramProvider(BaseProvider):
             result.external_source_id = f"{slug}:{post_id}"
             result.title = f"{getattr(entity, 'title', slug)} post {post_id}"
             return result
+
+    async def _extract_subscriber_count(self, client: TelegramClient, entity: Any) -> int | None:
+        if not GetFullChannelRequest:
+            return None
+        try:
+            full_channel = await client(GetFullChannelRequest(entity))
+        except RPCError:
+            return None
+
+        full_chat = getattr(full_channel, "full_chat", None)
+        participants_count = getattr(full_chat, "participants_count", None) if full_chat else None
+        return int(participants_count) if participants_count is not None else None
 
     async def _fetch_posts_live(
         self,

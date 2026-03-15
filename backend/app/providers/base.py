@@ -18,6 +18,7 @@ class ProviderValidationResult:
     reason: str | None = None
     external_source_id: str | None = None
     title: str | None = None
+    subscriber_count: int | None = None
 
 
 @dataclass(slots=True)

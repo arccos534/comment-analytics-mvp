@@ -64,6 +64,7 @@ class VkProvider(BaseProvider):
                 group = self._resolve_group(result.external_source_id or result.normalized_url or result.url, client=client)
                 result.external_source_id = str(-abs(group["id"]))
                 result.title = group["name"]
+                result.subscriber_count = int(group.get("members_count", 0) or 0) or None
                 return result
 
             owner_id, post_id = self._parse_vk_post_id(result.external_source_id)
@@ -205,7 +206,11 @@ class VkProvider(BaseProvider):
         resolved = self._api_call("utils.resolveScreenName", {"screen_name": slug}, client=client)
         if not resolved or resolved.get("type") not in {"group", "page", "event"}:
             raise ProviderRequestError("VK source is not a public community")
-        groups = self._api_call("groups.getById", {"group_ids": resolved["object_id"]}, client=client)
+        groups = self._api_call(
+            "groups.getById",
+            {"group_ids": resolved["object_id"], "fields": "members_count"},
+            client=client,
+        )
         if isinstance(groups, dict) and "groups" in groups:
             groups = groups["groups"]
         if isinstance(groups, dict):

@@ -148,6 +148,12 @@ class IngestionService:
         self.sources.update(source)
         try:
             provider = get_provider(source.platform)
+            refreshed = provider.validate_source(source.source_url)
+            if refreshed.is_valid and refreshed.can_save:
+                source.external_source_id = refreshed.external_source_id or source.external_source_id
+                source.title = refreshed.title or source.title
+                source.subscriber_count = refreshed.subscriber_count
+                self.sources.update(source)
             # A manual project reindex should rebuild the full source history unless
             # the caller explicitly requests an incremental sync via `since`.
             effective_since = since
