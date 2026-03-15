@@ -57,9 +57,9 @@ export function Sidebar() {
       <div className="app-panel-strong flex h-full flex-col overflow-hidden px-6 py-7">
         <div>
           <p className="section-kicker">Comment Analytics</p>
-          <h1 className="mt-4 inline-flex flex-wrap items-baseline gap-3 text-[36px] font-semibold tracking-[-0.06em] text-foreground">
+          <h1 className="mt-4 inline-flex items-baseline gap-3 whitespace-nowrap text-[36px] font-semibold tracking-[-0.06em] text-foreground">
             <span>Dashboard</span>
-            <span className="section-kicker text-[13px]">By arccos</span>
+            <span className="section-kicker text-[13px]">by arccos</span>
           </h1>
         </div>
 
