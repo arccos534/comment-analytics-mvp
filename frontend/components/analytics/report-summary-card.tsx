@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 export function ReportSummaryCard({
   summaryText,
   meta,
-  stats
+  stats,
 }: {
   summaryText: string | null;
   meta: {

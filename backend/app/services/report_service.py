@@ -8,5 +8,4 @@ class ReportService:
         self.summary_generator = SummaryGenerator()
 
     def build_summary(self, report_json: dict, prompt_text: str | None = None) -> tuple[dict, str]:
-        summary_text = self.summary_generator.generate_summary_text(report_json, prompt_text=prompt_text)
-        return {"overview": summary_text}, summary_text
+        return self.summary_generator.generate_summary_bundle(report_json, prompt_text=prompt_text)

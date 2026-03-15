@@ -7,6 +7,7 @@ import { ChevronDown, ChevronUp } from "lucide-react";
 import { CommentsSampleList } from "@/components/analytics/comments-sample-list";
 import { ReportSummaryCard } from "@/components/analytics/report-summary-card";
 import { SentimentCard } from "@/components/analytics/sentiment-card";
+import { ThemeReactionCard } from "@/components/analytics/theme-reaction-card";
 import { TopPostsCard } from "@/components/analytics/top-posts-card";
 import { TopicsCard } from "@/components/analytics/topics-card";
 import { Header } from "@/components/layout/header";
@@ -24,11 +25,11 @@ export default function ReportPage({ params }: { params: { projectId: string; re
   const [postsLimit, setPostsLimit] = useState("5");
 
   if (runQuery.isLoading) {
-    return <div>Loading analysis...</div>;
+    return <div>Загрузка анализа...</div>;
   }
 
   if (!runQuery.data) {
-    return <div className="text-rose-400">Analysis run not found.</div>;
+    return <div className="text-rose-400">Аналитический запуск не найден.</div>;
   }
 
   if (runQuery.data.status !== "completed") {
@@ -42,7 +43,7 @@ export default function ReportPage({ params }: { params: { projectId: string; re
   }
 
   if (reportQuery.isLoading || !reportQuery.data) {
-    return <div>Loading report...</div>;
+    return <div>Загрузка отчета...</div>;
   }
 
   const report = reportQuery.data.report_json;
@@ -51,8 +52,8 @@ export default function ReportPage({ params }: { params: { projectId: string; re
   return (
     <div className="space-y-8">
       <Header
-        title="Report snapshot"
-        subtitle={`Posts: ${report.stats.total_posts} | Comments: ${report.stats.total_comments} | Analyzed: ${report.stats.analyzed_comments}`}
+        title="Снимок отчета"
+        subtitle={`Постов: ${report.stats.total_posts} | Комментариев: ${report.stats.total_comments} | Проанализировано: ${report.stats.analyzed_comments}`}
       />
 
       <SentimentCard sentiment={report.sentiment} />
@@ -62,10 +63,15 @@ export default function ReportPage({ params }: { params: { projectId: string; re
         <ReportSummaryCard summaryText={reportQuery.data.summary_text} meta={report.meta} stats={report.stats} />
       </div>
 
+      <ThemeReactionCard
+        items={report.summary.theme_reaction_map || []}
+        confidence={report.summary.confidence_assessment}
+      />
+
       <div className="grid gap-5 xl:grid-cols-3">
-        <CommentsSampleList title="Positive examples" comments={report.examples.positive_comments} />
-        <CommentsSampleList title="Negative examples" comments={report.examples.negative_comments} />
-        <CommentsSampleList title="Neutral examples" comments={report.examples.neutral_comments} />
+        <CommentsSampleList title="Позитивные примеры" comments={report.examples.positive_comments} />
+        <CommentsSampleList title="Негативные примеры" comments={report.examples.negative_comments} />
+        <CommentsSampleList title="Нейтральные примеры" comments={report.examples.neutral_comments} />
       </div>
 
       <div className="flex flex-col gap-4 rounded-2xl border border-white/10 bg-card/50 px-4 py-4 backdrop-blur md:flex-row md:items-center md:justify-between">

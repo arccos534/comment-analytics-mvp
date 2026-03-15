@@ -247,9 +247,27 @@ class SummaryGenerator:
         self.settings = get_settings()
         self.redis = Redis.from_url(self.settings.redis_url, decode_responses=True)
 
-    def generate_summary_text(self, report_json: dict, prompt_text: str | None = None) -> str:
-        analyzed_comments = int(report_json.get("stats", {}).get("analyzed_comments", 0) or 0)
+    def generate_summary_bundle(self, report_json: dict, prompt_text: str | None = None) -> tuple[dict, str]:
         summary_payload = self._build_summary_payload(report_json, prompt_text)
+        summary_text = self._generate_summary_text_from_payload(report_json, prompt_text, summary_payload)
+        return {
+            "overview": summary_text,
+            "confidence_assessment": summary_payload.get("confidence_assessment", {}),
+            "theme_reaction_map": summary_payload.get("theme_reaction_map", []),
+            "focus_evidence": summary_payload.get("focus_evidence", []),
+        }, summary_text
+
+    def generate_summary_text(self, report_json: dict, prompt_text: str | None = None) -> str:
+        summary_payload = self._build_summary_payload(report_json, prompt_text)
+        return self._generate_summary_text_from_payload(report_json, prompt_text, summary_payload)
+
+    def _generate_summary_text_from_payload(
+        self,
+        report_json: dict,
+        prompt_text: str | None,
+        summary_payload: dict,
+    ) -> str:
+        analyzed_comments = int(report_json.get("stats", {}).get("analyzed_comments", 0) or 0)
         llm_enabled = (
             self.settings.llm_summary_enabled
             and self.settings.openai_compatible_base_url
@@ -300,6 +318,7 @@ class SummaryGenerator:
             "Когда речь идет о наиболее обсуждаемых, заметных или интересных новостях, ориентируйся прежде всего на количество комментариев, лайков и репостов у постов. "
             "Если пользователь спрашивает о самой обсуждаемой новости, назови ее прямо и объясни, почему она самая обсуждаемая "
             "(число комментариев, лайков, репостов, вовлеченность, характер реакции). "
+            "Первое содержательное предложение должно сразу отвечать на пользовательский запрос, без вводных фраз вроде 'по выборке видна картина' или 'в целом можно сказать'. "
             "Если answer_strategy указывает на один конкретный объект или один главный вывод, начни текст именно с него. "
             "Если answer_strategy указывает на сравнение или ранжирование, строй ответ вокруг сравнения или ранжирования, а не вокруг общей статистики. "
             "Если пользователь спрашивает о темах, выделяй только темы, которые реально подтверждаются несколькими постами или ключевыми постами выборки. "
@@ -522,6 +541,11 @@ class SummaryGenerator:
             (r"тем[аы]|сюжет", "theme_analysis"),
             (r"сравн|отлич|разниц", "comparison"),
             (r"причин|почему", "causal_explanation"),
+            (r"поддержива|одобря|хвал|благодар", "support_analysis"),
+            (r"жалоб|претензи|критикуют|ругают|недоволь", "complaints_analysis"),
+            (r"опасени|тревог|боят|страх|риски", "concerns_analysis"),
+            (r"конфликт|спор|поляриз|раздел", "polarization_analysis"),
+            (r"главн|ключев|основн.*вывод", "takeaways_analysis"),
         ]
         for pattern, mode in patterns:
             if re.search(pattern, prompt) and mode not in modes:
@@ -548,6 +572,22 @@ class SummaryGenerator:
             instructions.append(
                 "Определи, какие темы и сюжеты аудитория воспринимает скорее позитивно."
             )
+        if "support_analysis" in modes:
+            instructions.append(
+                "Определи, какие решения, сюжеты или действия аудитория поддерживает или одобряет."
+            )
+        if "complaints_analysis" in modes:
+            instructions.append(
+                "Определи, на что именно люди жалуются и в чем состоят основные претензии."
+            )
+        if "concerns_analysis" in modes:
+            instructions.append(
+                "Определи, что вызывает тревогу, опасения или настороженность аудитории."
+            )
+        if "polarization_analysis" in modes:
+            instructions.append(
+                "Покажи, где мнения аудитории расходятся и какие сюжеты вызывают полярную реакцию."
+            )
         if "theme_analysis" in modes:
             instructions.append(
                 "Выдели реальные темы самих новостей и постов, а не случайные слова из комментариев."
@@ -559,6 +599,10 @@ class SummaryGenerator:
         if "causal_explanation" in modes:
             instructions.append(
                 "Объясни причины реакции аудитории на основе содержания постов и комментариев."
+            )
+        if "takeaways_analysis" in modes:
+            instructions.append(
+                "Сформулируй главные содержательные выводы, а не только перечисление метрик."
             )
 
         if not instructions:
@@ -603,6 +647,18 @@ class SummaryGenerator:
 
         if re.search(r"позитив|нрав|одобр|поддерж", prompt):
             must_cover.append("Ответь, что аудитория воспринимает позитивно.")
+
+        if re.search(r"жалоб|претензи|недоволь|ругают", prompt):
+            must_cover.append("Покажи основные жалобы и претензии аудитории.")
+
+        if re.search(r"опасени|тревог|боят|страх|риски", prompt):
+            must_cover.append("Покажи, какие риски и опасения люди видят в обсуждаемых сюжетах.")
+
+        if re.search(r"конфликт|спор|поляриз|раздел", prompt):
+            must_cover.append("Покажи, какие темы вызывают наиболее полярную реакцию.")
+
+        if re.search(r"вывод|итог|резюме", prompt):
+            must_cover.append("Сформулируй короткий содержательный итог по запросу.")
 
         if not must_cover:
             must_cover.append("Дай максимально прямой и полезный ответ на пользовательский запрос.")

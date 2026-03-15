@@ -79,6 +79,12 @@ export interface ReportSnapshot {
     };
     summary: {
       overview?: string;
+      confidence_assessment?: {
+        level: "high" | "medium" | "low";
+        reason: string;
+      };
+      theme_reaction_map?: ThemeReactionItem[];
+      focus_evidence?: FocusEvidenceItem[];
     };
   };
   summary_text: string | null;
@@ -99,4 +105,30 @@ export interface ReportPost {
   post_text: string | null;
   score: number;
   comments_count: number;
+  relevant_comments_count?: number | null;
+  positive_relevant_comments_count?: number | null;
+  negative_relevant_comments_count?: number | null;
+  neutral_relevant_comments_count?: number | null;
+  likes_count?: number | null;
+  reposts_count?: number | null;
+  reaction_tendency?: string | null;
+}
+
+export interface ThemeReactionItem {
+  theme: string;
+  posts_count: number;
+  comments_count: number;
+  likes_count: number;
+  reposts_count: number;
+  interest_level: string;
+  reaction_tendency: string;
+  positive_comments: number;
+  negative_comments: number;
+  neutral_comments: number;
+  leading_post: ReportPost;
+}
+
+export interface FocusEvidenceItem {
+  matched_terms: string[];
+  post: ReportPost;
 }
