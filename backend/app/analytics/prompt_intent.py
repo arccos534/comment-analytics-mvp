@@ -146,6 +146,23 @@ PROMPT_STOPWORDS = {
     "каких",
     "какому",
     "каким",
+    "который",
+    "которая",
+    "которые",
+    "которое",
+    "которого",
+    "которых",
+    "больше",
+    "меньше",
+    "собрал",
+    "собрала",
+    "собрали",
+    "собрало",
+    "набрала",
+    "набрали",
+    "получил",
+    "получила",
+    "получили",
     "найди",
     "найти",
     "покажи",
@@ -454,6 +471,9 @@ def build_prompt_intent(prompt_text: str | None, has_explicit_scope: bool = Fals
     analysis_axes = infer_analysis_axes(prompt_text)
     scope_terms = extract_prompt_scope_terms(prompt_text)
     generic_scope = not [term for term in scope_terms if term not in GENERIC_PROMPT_SCOPE_TERMS]
+    prompt_mode = infer_prompt_mode(prompt_text)
+    if "most_discussed_news" in prompt_mode or "specific_news_answer" in prompt_mode:
+        generic_scope = True
     source_only = (
         "source_metrics" in analysis_axes
         and "post_scope" not in analysis_axes
@@ -464,7 +484,7 @@ def build_prompt_intent(prompt_text: str | None, has_explicit_scope: bool = Fals
         prompt_text=(prompt_text or "").strip(),
         normalized_text=normalized_text,
         analysis_axes=analysis_axes,
-        prompt_mode=infer_prompt_mode(prompt_text),
+        prompt_mode=prompt_mode,
         request_contract=infer_request_contract(prompt_text),
         answer_strategy=build_answer_strategy(prompt_text, analysis_axes),
         focus_terms=extract_prompt_focus_terms(prompt_text),

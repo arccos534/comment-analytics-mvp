@@ -372,6 +372,10 @@ class AnalyticsService:
         if not text:
             return False
 
+        prompt_intent = build_shared_prompt_intent(prompt_text, has_explicit_scope=False)
+        if prompt_intent.generic_scope:
+            return True
+
         prompt_terms = self._extract_prompt_scope_terms(prompt_text)
         if not prompt_terms:
             return True
