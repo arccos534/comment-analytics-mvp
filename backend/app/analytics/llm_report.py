@@ -1246,6 +1246,7 @@ class SummaryGenerator:
     def _compact_post(self, post: dict) -> dict:
         return {
             "post_id": post.get("post_id"),
+            "post_url": post.get("post_url"),
             "post_text": self._shorten(post.get("post_text") or "", limit=220),
             "platform": post.get("platform"),
             "comments_count": post.get("comments_count", 0),
