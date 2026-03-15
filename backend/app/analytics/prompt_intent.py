@@ -200,6 +200,14 @@ GENERIC_PROMPT_SCOPE_TERMS = {
     "обсуждаемый",
     "обсуждали",
     "мнение",
+    "реакция",
+    "реакции",
+    "лайки",
+    "лайков",
+    "просмотры",
+    "просмотров",
+    "охват",
+    "охваты",
 }
 
 SOURCE_METRIC_TERMS = {
@@ -337,6 +345,14 @@ def infer_prompt_mode(prompt_text: str | None) -> list[str]:
     patterns = [
         (r"сам[а-я]* обсужда", "most_discussed_news"),
         (r"наиболее обсужда", "most_discussed_news"),
+        (r"(больше всего|наибольш[а-я]*|максимальн[а-я]*).*(реакц|лайк)", "most_reacted_post"),
+        (r"(реакц|лайк).*(больше всего|наибольш[а-я]*|максимальн[а-я]*)", "most_reacted_post"),
+        (r"(больше всего|наибольш[а-я]*|максимальн[а-я]*).*(просмотр|охват)", "most_viewed_post"),
+        (r"(просмотр|охват).*(больше всего|наибольш[а-я]*|максимальн[а-я]*)", "most_viewed_post"),
+        (r"(меньше всего|наименьш[а-я]*|минимальн[а-я]*).*(реакц|лайк)", "least_reacted_post"),
+        (r"(реакц|лайк).*(меньше всего|наименьш[а-я]*|минимальн[а-я]*)", "least_reacted_post"),
+        (r"(меньше всего|наименьш[а-я]*|минимальн[а-я]*).*(просмотр|охват)", "least_viewed_post"),
+        (r"(просмотр|охват).*(меньше всего|наименьш[а-я]*|минимальн[а-я]*)", "least_viewed_post"),
         (r"какая новость", "specific_news_answer"),
         (r"какие новости", "specific_news_answer"),
         (r"в каком канале|какой канал|какое сообщество|какой источник", "source_comparison"),
@@ -367,6 +383,22 @@ def infer_request_contract(prompt_text: str | None) -> list[str]:
     if "most_discussed_news" in modes:
         instructions.append(
             "Определи конкретную новость или пост с наибольшим объемом обсуждения и объясни, по каким признакам она лидирует."
+        )
+    if "most_reacted_post" in modes:
+        instructions.append(
+            "Определи конкретную новость или пост с наибольшим числом реакций или лайков и объясни, по каким метрикам он лидирует."
+        )
+    if "most_viewed_post" in modes:
+        instructions.append(
+            "Определи конкретную новость или пост с наибольшим числом просмотров или охватом и объясни, по каким метрикам он лидирует."
+        )
+    if "least_reacted_post" in modes:
+        instructions.append(
+            "Определи конкретную новость или пост с наименьшим числом реакций или лайков и кратко объясни, почему он оказался внизу."
+        )
+    if "least_viewed_post" in modes:
+        instructions.append(
+            "Определи конкретную новость или пост с наименьшим числом просмотров или охватом и кратко объясни, почему он оказался внизу."
         )
     if "source_comparison" in modes:
         instructions.append(
@@ -416,6 +448,24 @@ def build_answer_strategy(prompt_text: str | None, analysis_axes: list[str] | No
             [
                 "Назови конкретную новость или пост-лидер.",
                 "Объясни, почему именно этот сюжет стал самым обсуждаемым.",
+            ]
+        )
+    elif re.search(r"(больше всего|наибольш[а-я]*|максимальн[а-я]*).*(реакц|лайк)|(реакц|лайк).*(больше всего|наибольш[а-я]*|максимальн[а-я]*)", prompt):
+        response_shape = "single_lead_item"
+        first_sentence_rule = "Начни с поста, который собрал больше всего реакций или лайков, и назови его прямо в первом предложении."
+        must_cover.extend(
+            [
+                "Назови конкретный пост-лидер по реакциям или лайкам.",
+                "Опирайся прежде всего на реакции или лайки, а комментарии используй как дополнительный сигнал.",
+            ]
+        )
+    elif re.search(r"(больше всего|наибольш[а-я]*|максимальн[а-я]*).*(просмотр|охват)|(просмотр|охват).*(больше всего|наибольш[а-я]*|максимальн[а-я]*)", prompt):
+        response_shape = "single_lead_item"
+        first_sentence_rule = "Начни с поста, который собрал больше всего просмотров или охвата, и назови его прямо в первом предложении."
+        must_cover.extend(
+            [
+                "Назови конкретный пост-лидер по просмотрам или охвату.",
+                "Опирайся прежде всего на просмотры или охват, а остальные метрики используй как вторичный контекст.",
             ]
         )
     elif re.search(r"в каком канале|какой канал|какое сообщество|какой источник|активн[а-я]* аудитори|сравн.*канал|сравн.*сообществ|сравн.*источник", prompt):
@@ -472,7 +522,14 @@ def build_prompt_intent(prompt_text: str | None, has_explicit_scope: bool = Fals
     scope_terms = extract_prompt_scope_terms(prompt_text)
     generic_scope = not [term for term in scope_terms if term not in GENERIC_PROMPT_SCOPE_TERMS]
     prompt_mode = infer_prompt_mode(prompt_text)
-    if "most_discussed_news" in prompt_mode or "specific_news_answer" in prompt_mode:
+    if {
+        "most_discussed_news",
+        "specific_news_answer",
+        "most_reacted_post",
+        "most_viewed_post",
+        "least_reacted_post",
+        "least_viewed_post",
+    } & set(prompt_mode):
         generic_scope = True
     source_only = (
         "source_metrics" in analysis_axes

@@ -509,6 +509,8 @@ class SummaryGenerator:
             "- if analysis_request.theme_of_posts is present, rely only on theme-scoped evidence; do not pull unrelated stories.\n"
             "- if analysis_request.analysis_axes indicates source_metrics without post_scope/comment_reaction, answer at source/channel level, not through one post.\n"
             "- if prompt_mode contains most_discussed_news and top_discussed_posts is not empty, explicitly name the leading post.\n"
+            "- if prompt_mode contains most_reacted_post and top_reacted_posts is not empty, explicitly name the leading post by reactions or likes, not by comments.\n"
+            "- if prompt_mode contains most_viewed_post and top_viewed_posts is not empty, explicitly name the leading post by views.\n"
             "- use focus_evidence and theme_reaction_map when they are relevant to the prompt.\n"
             "- do not invent themes from raw word fragments or single noisy tokens.\n"
             "- do not mention generic topics like 'general discussion' unless they are truly the only defensible conclusion.\n"
@@ -621,6 +623,45 @@ class SummaryGenerator:
             key=lambda post: (post.get("comments_count", 0), post.get("score", 0)),
             reverse=True,
         )[:5]
+        ranking_posts = theme_basis_posts or matched_posts or top_popular or top_unpopular
+        top_reacted = sorted(
+            ranking_posts,
+            key=lambda post: (
+                post.get("likes_count", 0),
+                post.get("views_count", 0),
+                post.get("comments_count", 0),
+                post.get("reposts_count", 0),
+            ),
+            reverse=True,
+        )[:5]
+        least_reacted = sorted(
+            ranking_posts,
+            key=lambda post: (
+                post.get("likes_count", 0),
+                post.get("views_count", 0),
+                post.get("comments_count", 0),
+                post.get("reposts_count", 0),
+            ),
+        )[:5]
+        top_viewed = sorted(
+            ranking_posts,
+            key=lambda post: (
+                post.get("views_count", 0),
+                post.get("likes_count", 0),
+                post.get("comments_count", 0),
+                post.get("reposts_count", 0),
+            ),
+            reverse=True,
+        )[:5]
+        least_viewed = sorted(
+            ranking_posts,
+            key=lambda post: (
+                post.get("views_count", 0),
+                post.get("likes_count", 0),
+                post.get("comments_count", 0),
+                post.get("reposts_count", 0),
+            ),
+        )[:5]
         max_examples = max(self.settings.llm_summary_max_examples_per_bucket, 2)
 
         meaningful_topics = [
@@ -700,6 +741,10 @@ class SummaryGenerator:
             },
             "matched_posts": [self._compact_post(post) for post in matched_posts],
             "top_discussed_posts": [self._compact_post(post) for post in top_discussed],
+            "top_reacted_posts": [self._compact_post(post) for post in top_reacted],
+            "least_reacted_posts": [self._compact_post(post) for post in least_reacted],
+            "top_viewed_posts": [self._compact_post(post) for post in top_viewed],
+            "least_viewed_posts": [self._compact_post(post) for post in least_viewed],
             "theme_scoped_posts": [self._compact_post(post) for post in (theme_scoped_posts[:8] if theme_scoped_posts else [])],
             "top_popular_posts": [self._compact_post(post) for post in top_popular],
             "top_unpopular_posts": [self._compact_post(post) for post in top_unpopular],
@@ -1493,6 +1538,7 @@ class SummaryGenerator:
             "neutral_relevant_comments_count": post.get("neutral_relevant_comments_count", 0),
             "likes_count": post.get("likes_count", 0),
             "reposts_count": post.get("reposts_count", 0),
+            "views_count": post.get("views_count", 0),
             "reaction_tendency": self._reaction_label(
                 int(post.get("positive_relevant_comments_count", 0) or 0),
                 int(post.get("negative_relevant_comments_count", 0) or 0),
@@ -1547,6 +1593,10 @@ class SummaryGenerator:
         focus_evidence = payload.get("focus_evidence", []) or []
         top_discussed_posts = payload.get("top_discussed_posts", []) or []
         source_comparison = payload.get("source_comparison_map", []) or []
+        top_reacted_posts = payload.get("top_reacted_posts", []) or []
+        least_reacted_posts = payload.get("least_reacted_posts", []) or []
+        top_viewed_posts = payload.get("top_viewed_posts", []) or []
+        least_viewed_posts = payload.get("least_viewed_posts", []) or []
         request = payload.get("analysis_request", {}) or {}
         prompt_modes = set(request.get("prompt_mode", []) or [])
         analysis_axes = set(request.get("analysis_axes", []) or [])
@@ -1592,7 +1642,31 @@ class SummaryGenerator:
                     f"Ближе всего к запросу относится сюжет «{post_text}» — он напрямую связан с темами: {matched_terms}."
                 )
 
-        if "most_discussed_news" in prompt_modes and top_discussed_posts:
+        if "most_reacted_post" in prompt_modes and top_reacted_posts:
+            lead_post = top_reacted_posts[0]
+            metric_label = self._engagement_metric_label(lead_post)
+            takeaways.append(
+                f"Больше всего {metric_label} набрала публикация «{lead_post['post_text']}»: {lead_post['likes_count']} {metric_label}, {lead_post['comments_count']} комментариев и {lead_post['reposts_count']} репостов."
+            )
+        elif "most_viewed_post" in prompt_modes and top_viewed_posts:
+            lead_post = top_viewed_posts[0]
+            metric_label = self._engagement_metric_label(lead_post)
+            takeaways.append(
+                f"Наибольший охват получила публикация «{lead_post['post_text']}»: {lead_post['views_count']} просмотров, {lead_post['likes_count']} {metric_label} и {lead_post['comments_count']} комментариев."
+            )
+        elif "least_reacted_post" in prompt_modes and least_reacted_posts:
+            lead_post = least_reacted_posts[0]
+            metric_label = self._engagement_metric_label(lead_post)
+            takeaways.append(
+                f"Меньше всего {metric_label} у публикации «{lead_post['post_text']}»: {lead_post['likes_count']} {metric_label}, {lead_post['comments_count']} комментариев и {lead_post['reposts_count']} репостов."
+            )
+        elif "least_viewed_post" in prompt_modes and least_viewed_posts:
+            lead_post = least_viewed_posts[0]
+            metric_label = self._engagement_metric_label(lead_post)
+            takeaways.append(
+                f"Наименьший охват у публикации «{lead_post['post_text']}»: {lead_post['views_count']} просмотров, {lead_post['likes_count']} {metric_label} и {lead_post['comments_count']} комментариев."
+            )
+        elif "most_discussed_news" in prompt_modes and top_discussed_posts:
             lead_post = top_discussed_posts[0]
             metric_label = self._engagement_metric_label(lead_post)
             takeaways.append(
@@ -1661,6 +1735,10 @@ class SummaryGenerator:
         positive_topics = payload["positive_signals"]["topics"] or payload["positive_signals"]["patterns"]
         negative_topics = payload["negative_signals"]["topics"] or payload["negative_signals"]["patterns"]
         top_discussed_posts = payload["top_discussed_posts"]
+        top_reacted_posts = payload.get("top_reacted_posts", [])
+        least_reacted_posts = payload.get("least_reacted_posts", [])
+        top_viewed_posts = payload.get("top_viewed_posts", [])
+        least_viewed_posts = payload.get("least_viewed_posts", [])
         focus_evidence = payload.get("focus_evidence", [])
         theme_reaction_map = payload.get("theme_reaction_map", [])
         source_comparison = payload.get("source_comparison_map", [])
@@ -1688,7 +1766,35 @@ class SummaryGenerator:
                     f"поэтому лидерство видно не по одной новости, а по суммарной активности аудитории на уровне канала или сообщества. "
                 )
 
-        if not source_only and "most_discussed_news" in modes and top_discussed_posts:
+        if not source_only and "most_reacted_post" in modes and top_reacted_posts:
+            lead = top_reacted_posts[0]
+            metric_label = self._engagement_metric_label(lead)
+            parts.append(
+                f"Постом с наибольшим числом {metric_label} в текущей выборке выглядит публикация «{lead['post_text']}»: "
+                f"она набрала {lead['likes_count']} {metric_label}, {lead['comments_count']} комментариев и {lead['reposts_count']} репостов. "
+            )
+        elif not source_only and "most_viewed_post" in modes and top_viewed_posts:
+            lead = top_viewed_posts[0]
+            metric_label = self._engagement_metric_label(lead)
+            parts.append(
+                f"Постом с наибольшим охватом в текущей выборке выглядит публикация «{lead['post_text']}»: "
+                f"она собрала {lead['views_count']} просмотров, {lead['likes_count']} {metric_label} и {lead['comments_count']} комментариев. "
+            )
+        elif not source_only and "least_reacted_post" in modes and least_reacted_posts:
+            lead = least_reacted_posts[0]
+            metric_label = self._engagement_metric_label(lead)
+            parts.append(
+                f"Меньше всего {metric_label} в текущей выборке набрала публикация «{lead['post_text']}»: "
+                f"{lead['likes_count']} {metric_label}, {lead['comments_count']} комментариев и {lead['reposts_count']} репостов. "
+            )
+        elif not source_only and "least_viewed_post" in modes and least_viewed_posts:
+            lead = least_viewed_posts[0]
+            metric_label = self._engagement_metric_label(lead)
+            parts.append(
+                f"Наименьший охват в текущей выборке у публикации «{lead['post_text']}»: "
+                f"{lead['views_count']} просмотров, {lead['likes_count']} {metric_label} и {lead['comments_count']} комментариев. "
+            )
+        elif not source_only and "most_discussed_news" in modes and top_discussed_posts:
             lead = top_discussed_posts[0]
             metric_label = self._engagement_metric_label(lead)
             parts.append(
