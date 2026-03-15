@@ -118,6 +118,7 @@ export interface ReportPost {
 
 export interface ThemeReactionItem {
   theme: string;
+  platform?: string | null;
   posts_count: number;
   comments_count: number;
   likes_count: number;

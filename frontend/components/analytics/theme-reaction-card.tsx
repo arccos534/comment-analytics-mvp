@@ -1,3 +1,5 @@
+"use client";
+
 import { ThemeReactionItem } from "@/types/analytics";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -7,6 +9,21 @@ const CONFIDENCE_STYLES: Record<string, string> = {
   medium: "border-amber-400/20 bg-amber-400/10 text-amber-200",
   low: "border-rose-400/20 bg-rose-400/10 text-rose-200",
 };
+
+function getConfidenceLabel(level: "high" | "medium" | "low") {
+  if (level === "high") {
+    return "Высокая уверенность";
+  }
+  if (level === "medium") {
+    return "Средняя уверенность";
+  }
+  return "Низкая уверенность";
+}
+
+function getEngagementLabel(item: ThemeReactionItem) {
+  const platform = (item.platform || item.leading_post.platform || "").toLowerCase();
+  return platform === "telegram" ? "реакций" : "лайков";
+}
 
 export function ThemeReactionCard({
   items,
@@ -33,7 +50,7 @@ export function ThemeReactionCard({
               CONFIDENCE_STYLES[confidence.level] ?? CONFIDENCE_STYLES.low
             }`}
           >
-            {confidence.level === "high" ? "Высокая уверенность" : confidence.level === "medium" ? "Средняя уверенность" : "Низкая уверенность"}
+            {getConfidenceLabel(confidence.level)}
           </div>
         ) : null}
       </CardHeader>
@@ -52,7 +69,8 @@ export function ThemeReactionCard({
                   <div>
                     <div className="text-base font-semibold">{item.theme}</div>
                     <div className="mt-1 text-sm text-muted-foreground">
-                      {item.posts_count} постов · {item.comments_count} комментариев · {item.likes_count} лайков · {item.reposts_count} репостов
+                      {item.posts_count} постов · {item.comments_count} комментариев · {item.likes_count}{" "}
+                      {getEngagementLabel(item)} · {item.reposts_count} репостов
                     </div>
                   </div>
                   <div className="flex flex-wrap gap-2 text-xs">
@@ -79,7 +97,9 @@ export function ThemeReactionCard({
 
                 <div className="mt-3 rounded-xl border border-border/50 bg-background/35 px-3 py-3">
                   <div className="text-xs uppercase tracking-wide text-muted-foreground">Ведущий пост по теме</div>
-                  <div className="mt-2 text-sm leading-6 text-foreground/92">{item.leading_post.post_text || "Нет текста поста"}</div>
+                  <div className="mt-2 text-sm leading-6 text-foreground/92">
+                    {item.leading_post.post_text || "Нет текста поста"}
+                  </div>
                 </div>
               </div>
             ))}

@@ -123,6 +123,137 @@ GENERIC_PROMPT_SCOPE_TERMS = {
 }
 
 
+PROMPT_SCOPE_STOPWORDS_V2 = {
+    "проанализируй",
+    "проанализировать",
+    "анализ",
+    "какой",
+    "какая",
+    "какие",
+    "какого",
+    "каких",
+    "какому",
+    "каким",
+    "покажи",
+    "показать",
+    "найди",
+    "найти",
+    "оцени",
+    "оценить",
+    "сделай",
+    "сделать",
+    "дай",
+    "дать",
+    "нужно",
+    "надо",
+    "хочу",
+    "ответ",
+    "ответь",
+    "вывод",
+    "новость",
+    "новости",
+    "пост",
+    "посты",
+    "люди",
+    "думают",
+    "думать",
+    "мнение",
+    "реакция",
+    "реакции",
+    "реакцию",
+    "аудитории",
+    "людей",
+    "комментарии",
+    "комментариев",
+    "комментариям",
+    "комментария",
+    "интерес",
+    "интересные",
+    "интересное",
+    "вызывает",
+    "вызывают",
+    "вызвали",
+    "вызвала",
+    "негатив",
+    "негативные",
+    "позитив",
+    "позитивные",
+    "эмоции",
+    "эмоцию",
+    "самой",
+    "самая",
+    "самый",
+    "обсуждаемая",
+    "обсуждаемой",
+    "обсуждаемую",
+    "обсуждаемый",
+    "обсуждали",
+}
+
+GENERIC_PROMPT_SCOPE_TERMS_V2 = {
+    "новость",
+    "новости",
+    "пост",
+    "посты",
+    "люди",
+    "думают",
+    "думать",
+    "была",
+    "были",
+    "самая",
+    "самой",
+    "самый",
+    "обсуждаемая",
+    "обсуждаемой",
+    "обсуждаемый",
+    "обсуждали",
+    "мнение",
+}
+
+RUSSIAN_STEM_SUFFIXES = (
+    "иями",
+    "ями",
+    "ами",
+    "иях",
+    "ого",
+    "ему",
+    "ому",
+    "ыми",
+    "ими",
+    "иям",
+    "ием",
+    "ов",
+    "ев",
+    "ей",
+    "ой",
+    "ий",
+    "ый",
+    "ая",
+    "ое",
+    "ые",
+    "ых",
+    "ую",
+    "юю",
+    "ом",
+    "ем",
+    "ам",
+    "ям",
+    "ах",
+    "ях",
+    "ию",
+    "ья",
+    "ия",
+    "а",
+    "я",
+    "ы",
+    "и",
+    "е",
+    "у",
+    "ю",
+    "о",
+)
+
+
 class AnalyticsService:
     def __init__(self, db: Session) -> None:
         self.db = db
@@ -242,15 +373,46 @@ class AnalyticsService:
     def _tokenize_scope(self, value: str) -> set[str]:
         return set(re.findall(r"[A-Za-zА-Яа-яЁё0-9-]{4,}", value.lower()))
 
+    def _normalize_term(self, value: str) -> str:
+        return " ".join((value or "").lower().replace("ё", "е").split())
+
+    def _stem_token(self, token: str) -> str:
+        normalized = self._normalize_term(token)
+        for suffix in RUSSIAN_STEM_SUFFIXES:
+            if normalized.endswith(suffix) and len(normalized) - len(suffix) >= 4:
+                return normalized[: -len(suffix)]
+        return normalized
+
+    def _extract_text_roots(self, text: str) -> set[str]:
+        tokens = re.findall(r"[a-zа-я0-9-]{4,}", self._normalize_term(text))
+        roots = {self._stem_token(token) for token in tokens}
+        return {root for root in roots if root}
+
+    def _term_matches_scope(self, term: str, normalized_text: str, text_roots: set[str]) -> bool:
+        normalized_term = self._normalize_term(term)
+        if normalized_term and normalized_term in normalized_text:
+            return True
+
+        root = self._stem_token(normalized_term)
+        if not root:
+            return False
+
+        for candidate in text_roots:
+            if candidate == root:
+                return True
+            if len(root) >= 5 and (candidate.startswith(root) or root.startswith(candidate)):
+                return True
+        return False
+
     def _extract_prompt_scope_terms(self, prompt_text: str | None) -> list[str]:
-        prompt = (prompt_text or "").strip().lower()
+        prompt = self._normalize_term(prompt_text or "")
         if not prompt:
             return []
 
-        tokens = re.findall(r"[A-Za-zА-Яа-яЁё0-9-]{4,}", prompt)
+        tokens = re.findall(r"[a-zа-я0-9-]{4,}", prompt)
         ordered: list[str] = []
         for token in tokens:
-            if token in PROMPT_SCOPE_STOPWORDS:
+            if token in PROMPT_SCOPE_STOPWORDS_V2:
                 continue
             if token not in ordered:
                 ordered.append(token)
@@ -265,12 +427,13 @@ class AnalyticsService:
         if not prompt_terms:
             return True
 
-        focus_terms = [term for term in prompt_terms if term not in GENERIC_PROMPT_SCOPE_TERMS]
+        focus_terms = [term for term in prompt_terms if term not in GENERIC_PROMPT_SCOPE_TERMS_V2]
         if not focus_terms:
             return True
 
-        lowered = text.lower()
-        overlap = sum(1 for token in focus_terms if token in lowered)
+        lowered = self._normalize_term(text)
+        roots = self._extract_text_roots(lowered)
+        overlap = sum(1 for token in focus_terms if self._term_matches_scope(token, lowered, roots))
         if overlap >= 2 or (len(focus_terms) <= 3 and overlap >= 1):
             return True
 

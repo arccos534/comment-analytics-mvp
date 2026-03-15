@@ -230,6 +230,11 @@ CANONICAL_THEME_PATTERNS: list[tuple[str, str]] = [
     (r"\bбел[а-я]*\s+списк", "Сайты из белого списка"),
     (r"\bтелеграм\b.*\bзамедл", "Замедление Telegram"),
     (r"\bтелеграм\b.*\bблокир", "Блокировки Telegram"),
+    (r"\bмосковск[а-я]*\b.*\bнедел[а-я]*\b.*\bмод[а-я]*", "Московская неделя моды"),
+    (r"\bнедел[а-я]*\b.*\bмод[а-я]*\b.*\bмосковск[а-я]*", "Московская неделя моды"),
+    (r"\bподснежник[а-я]*", "Подснежники"),
+    (r"\bталон[а-я]*\b.*\bинтернет", "Талоны на интернет"),
+    (r"\bинтернет\b.*\bталон[а-я]*", "Талоны на интернет"),
     (r"\bснег", "Уборка снега"),
     (r"\bуборк[а-я]*\b.*\bснег", "Уборка снега"),
     (r"\bблагоустрой", "Благоустройство дворов и общественных пространств"),
@@ -241,6 +246,64 @@ CANONICAL_THEME_PATTERNS: list[tuple[str, str]] = [
     (r"\bдорог", "Дороги и дорожные работы"),
     (r"\bсвяз[ьи]", "Проблемы связи"),
 ]
+
+THEME_NOISE_TOKENS = {
+    "подслушано",
+    "тусовки",
+    "стабильно",
+    "городской",
+    "городские",
+}
+
+LOCATION_NOISE_ROOTS = {
+    "барнаул",
+    "москв",
+    "подмосков",
+    "алтайск",
+}
+
+RUSSIAN_STEM_SUFFIXES = (
+    "иями",
+    "ями",
+    "ами",
+    "иях",
+    "ого",
+    "ему",
+    "ому",
+    "ыми",
+    "ими",
+    "иям",
+    "ием",
+    "ов",
+    "ев",
+    "ей",
+    "ой",
+    "ий",
+    "ый",
+    "ая",
+    "ое",
+    "ые",
+    "ых",
+    "ую",
+    "юю",
+    "ом",
+    "ем",
+    "ам",
+    "ям",
+    "ах",
+    "ях",
+    "ию",
+    "ья",
+    "ия",
+    "а",
+    "я",
+    "ы",
+    "и",
+    "е",
+    "у",
+    "ю",
+    "о",
+)
 
 
 class SummaryGenerator:
@@ -509,7 +572,7 @@ class SummaryGenerator:
                 seen.add(post_id)
 
             text = self._normalize_text(post.get("post_text") or "")
-            matched_terms = [term for term in focus_terms if self._normalize_text(term) in text]
+            matched_terms = [term for term in focus_terms if self._term_matches_text(term, text)]
             if not matched_terms:
                 continue
 
@@ -823,10 +886,17 @@ class SummaryGenerator:
         tokens = [
             token
             for token in re.findall(r"[a-zа-я0-9-]{4,}", text)
-            if self._is_theme_token(token)
+            if self._is_theme_token(token) and token not in THEME_NOISE_TOKENS
         ]
         if not tokens:
             return None
+
+        if len(tokens) > 1:
+            tokens = [
+                token
+                for token in tokens
+                if self._stem_token(token) not in LOCATION_NOISE_ROOTS and token not in THEME_NOISE_TOKENS
+            ] or tokens
 
         if len(tokens) >= 3:
             tokens = tokens[:3]
@@ -836,7 +906,15 @@ class SummaryGenerator:
         phrase = " ".join(tokens)
         phrase = self._titleize_phrase(phrase)
 
-        weak_phrases = {"Интернет подмосковье тоже", "Подмосковье тоже", "Отключать работать", "Интернет подмосковье"}
+        weak_phrases = {
+            "Интернет подмосковье тоже",
+            "Подмосковье тоже",
+            "Отключать работать",
+            "Интернет подмосковье",
+            "Барнауле стабильно подслушано",
+            "Стабильно подслушано тусовки",
+            "Ввели талоны подслушано",
+        }
         if phrase in weak_phrases:
             return None
         return phrase
@@ -846,7 +924,7 @@ class SummaryGenerator:
         return chunks or [text]
 
     def _is_theme_token(self, token: str) -> bool:
-        if token in POST_THEME_STOPWORDS or token in VERBISH_THEME_TOKENS:
+        if token in POST_THEME_STOPWORDS or token in VERBISH_THEME_TOKENS or token in THEME_NOISE_TOKENS:
             return False
         if len(token) < 4:
             return False
@@ -941,6 +1019,7 @@ class SummaryGenerator:
 
     def _compact_post(self, post: dict) -> dict:
         return {
+            "post_id": post.get("post_id"),
             "post_text": self._shorten(post.get("post_text") or "", limit=220),
             "platform": post.get("platform"),
             "score": post.get("score", 0),
@@ -989,15 +1068,7 @@ class SummaryGenerator:
             if not theme_text:
                 continue
 
-            matched = False
-            for term in normalized_terms:
-                tokens = [token for token in re.findall(r"[a-zа-я0-9-]{4,}", term) if token not in PROMPT_STOPWORDS]
-                if not tokens:
-                    continue
-                hits = sum(1 for token in tokens if token in theme_text)
-                if hits >= min(2, len(tokens)) or (len(tokens) == 1 and hits >= 1):
-                    matched = True
-                    break
+            matched = any(self._term_matches_text(term, theme_text) for term in normalized_terms)
 
             if matched:
                 filtered.append(item)
@@ -1200,6 +1271,39 @@ class SummaryGenerator:
     def _normalize_text(self, value: str) -> str:
         return " ".join(value.lower().replace("ё", "е").split())
 
+    def _stem_token(self, token: str) -> str:
+        normalized = self._normalize_text(token)
+        for suffix in RUSSIAN_STEM_SUFFIXES:
+            if normalized.endswith(suffix) and len(normalized) - len(suffix) >= 4:
+                return normalized[: -len(suffix)]
+        return normalized
+
+    def _extract_roots(self, text: str) -> set[str]:
+        tokens = re.findall(r"[a-zа-я0-9-]{4,}", self._normalize_text(text))
+        roots = {self._stem_token(token) for token in tokens}
+        return {root for root in roots if root}
+
+    def _term_matches_text(self, term: str, text: str) -> bool:
+        normalized_text = self._normalize_text(text)
+        normalized_term = self._normalize_text(term)
+        if not normalized_text or not normalized_term:
+            return False
+        if normalized_term in normalized_text:
+            return True
+
+        term_roots = self._extract_roots(normalized_term)
+        text_roots = self._extract_roots(normalized_text)
+        if not term_roots or not text_roots:
+            return False
+
+        for root in term_roots:
+            for candidate in text_roots:
+                if candidate == root:
+                    return True
+                if len(root) >= 5 and (candidate.startswith(root) or root.startswith(candidate)):
+                    return True
+        return False
+
     def _theme_matches_post(self, theme: str, post: dict) -> bool:
         theme_text = self._normalize_text(theme)
         post_text = self._normalize_text(post.get("post_text") or "")
@@ -1213,7 +1317,7 @@ class SummaryGenerator:
         tokens = [token for token in re.findall(r"[a-zа-я0-9-]{4,}", theme_text) if token not in POST_THEME_STOPWORDS]
         if not tokens:
             return False
-        return all(token in post_text for token in tokens[:2])
+        return all(self._term_matches_text(token, post_text) for token in tokens[:2])
 
     def _engagement_label(self, comments_count: int, likes_count: int, reposts_count: int) -> str:
         score = comments_count * 5 + likes_count * 2 + reposts_count * 4
