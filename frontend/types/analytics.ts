@@ -79,6 +79,7 @@ export interface ReportSnapshot {
     };
     summary: {
       overview?: string;
+      takeaways?: string[];
       confidence_assessment?: {
         level: "high" | "medium" | "low";
         reason: string;

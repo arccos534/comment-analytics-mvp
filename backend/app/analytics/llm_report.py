@@ -252,6 +252,7 @@ class SummaryGenerator:
         summary_text = self._generate_summary_text_from_payload(report_json, prompt_text, summary_payload)
         return {
             "overview": summary_text,
+            "takeaways": self._build_takeaways(report_json, summary_payload, prompt_text),
             "confidence_assessment": summary_payload.get("confidence_assessment", {}),
             "theme_reaction_map": summary_payload.get("theme_reaction_map", []),
             "focus_evidence": summary_payload.get("focus_evidence", []),
@@ -324,7 +325,8 @@ class SummaryGenerator:
             "Если пользователь спрашивает о темах, выделяй только темы, которые реально подтверждаются несколькими постами или ключевыми постами выборки. "
             "Если в payload есть focus_evidence, используй его как основной слой доказательств для того, какие сюжеты ближе всего к формулировке пользовательского запроса. "
             "Если в payload есть theme_reaction_map, используй его как готовую карту связок тема -> интерес -> тип реакции аудитории. "
-            "Если confidence_assessment = low, говори осторожно и не делай сильных обобщений. "
+            "Если confidence_assessment = low, говори осторожно, не делай сильных обобщений и не приписывай всей аудитории устойчивую позицию без прямой опоры в данных. "
+            "При low confidence опирайся на конкретные посты и конкретные комментарии, а не на широкие формулировки уровня всего информационного поля. "
             "Не используй мусорные формулировки вроде 'Общее обсуждение', если они не помогают ответить на вопрос. "
             "Не придумывай темы из одиночных слов без смысловой опоры. "
             "Ответ должен быть четким, структурированным и полезным для заказчика. "
@@ -951,6 +953,78 @@ class SummaryGenerator:
                 int(post.get("neutral_relevant_comments_count", 0) or 0),
             ),
         }
+
+    def _build_takeaways(self, report_json: dict, payload: dict, prompt_text: str | None) -> list[str]:
+        stats = report_json.get("stats", {})
+        analyzed_comments = int(stats.get("analyzed_comments", 0) or 0)
+        total_posts = int(stats.get("total_posts", 0) or 0)
+        confidence = payload.get("confidence_assessment", {})
+        themes = payload.get("theme_reaction_map", []) or []
+        focus_evidence = payload.get("focus_evidence", []) or []
+        top_discussed_posts = payload.get("top_discussed_posts", []) or []
+
+        takeaways: list[str] = []
+
+        if confidence.get("level") == "low":
+            takeaways.append(
+                f"Выборка небольшая: {total_posts} постов и {analyzed_comments} релевантных комментариев, поэтому выводы предварительные."
+            )
+
+        if focus_evidence:
+            lead = focus_evidence[0]
+            matched_terms = ", ".join(lead.get("matched_terms", [])[:3])
+            post = lead.get("post", {})
+            post_text = post.get("post_text") or "ключевой публикации"
+            if matched_terms:
+                takeaways.append(
+                    f"Ближе всего к запросу относится сюжет «{post_text}» — он напрямую связан с темами: {matched_terms}."
+                )
+
+        if themes:
+            most_interesting = sorted(
+                themes,
+                key=lambda item: (
+                    item.get("comments_count", 0),
+                    item.get("likes_count", 0),
+                    item.get("reposts_count", 0),
+                ),
+                reverse=True,
+            )[0]
+            takeaways.append(
+                f"Самый сильный отклик вызывает тема «{most_interesting['theme']}»: {most_interesting['comments_count']} комментариев, {most_interesting['likes_count']} лайков и {most_interesting['reposts_count']} репостов."
+            )
+
+            strongest_negative = next(
+                (item for item in themes if item.get("reaction_tendency") == "скорее негативная"),
+                None,
+            )
+            strongest_positive = next(
+                (item for item in themes if item.get("reaction_tendency") == "скорее позитивная"),
+                None,
+            )
+
+            if strongest_negative:
+                takeaways.append(
+                    f"Наиболее негативная реакция заметна вокруг темы «{strongest_negative['theme']}»."
+                )
+            elif strongest_positive:
+                takeaways.append(
+                    f"Наиболее позитивная реакция заметна вокруг темы «{strongest_positive['theme']}»."
+                )
+        elif top_discussed_posts:
+            lead_post = top_discussed_posts[0]
+            takeaways.append(
+                f"Наиболее обсуждаемым оказался пост «{lead_post['post_text']}» с {lead_post['comments_count']} комментариями."
+            )
+
+        if not takeaways and prompt_text:
+            takeaways.append(f"По запросу «{prompt_text.strip()}» в выборке пока не хватает устойчивых аналитических сигналов.")
+
+        unique: list[str] = []
+        for item in takeaways:
+            if item and item not in unique:
+                unique.append(item)
+        return unique[:3]
 
     def _build_fallback_summary(self, report_json: dict, prompt_text: str | None, payload: dict) -> str:
         stats = report_json.get("stats", {})

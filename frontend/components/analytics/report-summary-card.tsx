@@ -4,6 +4,7 @@ export function ReportSummaryCard({
   summaryText,
   meta,
   stats,
+  takeaways,
 }: {
   summaryText: string | null;
   meta: {
@@ -16,6 +17,7 @@ export function ReportSummaryCard({
     total_comments: number;
     analyzed_comments: number;
   };
+  takeaways?: string[];
 }) {
   return (
     <Card className="border-white/10 bg-card/70 backdrop-blur">
@@ -35,6 +37,19 @@ export function ReportSummaryCard({
             value={`${stats.total_posts} постов / ${stats.analyzed_comments} релевантных комментариев`}
           />
         </div>
+
+        {takeaways?.length ? (
+          <div className="space-y-2 rounded-2xl border border-cyan-400/15 bg-cyan-400/[0.06] px-4 py-4">
+            <div className="text-xs uppercase tracking-[0.18em] text-cyan-200/80">Top takeaways</div>
+            <div className="space-y-2">
+              {takeaways.map((item) => (
+                <div key={item} className="rounded-xl border border-white/8 bg-background/35 px-3 py-3 text-foreground/95">
+                  {item}
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
 
         {summaryText ? (
           <div className="rounded-2xl border border-border/50 bg-background/40 px-4 py-4">

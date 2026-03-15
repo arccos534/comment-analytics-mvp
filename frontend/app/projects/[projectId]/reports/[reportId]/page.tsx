@@ -60,7 +60,12 @@ export default function ReportPage({ params }: { params: { projectId: string; re
 
       <div className="grid gap-5 xl:grid-cols-2">
         <TopicsCard topics={report.topics} />
-        <ReportSummaryCard summaryText={reportQuery.data.summary_text} meta={report.meta} stats={report.stats} />
+        <ReportSummaryCard
+          summaryText={reportQuery.data.summary_text}
+          meta={report.meta}
+          stats={report.stats}
+          takeaways={report.summary.takeaways || []}
+        />
       </div>
 
       <ThemeReactionCard
