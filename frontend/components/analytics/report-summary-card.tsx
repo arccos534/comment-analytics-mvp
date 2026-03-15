@@ -1,10 +1,23 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { AnalysisMode } from "@/types/analytics";
+
+const MODE_LABELS: Record<AnalysisMode, string> = {
+  source_comparison: "Сравнение источников",
+  post_popularity: "Популярность постов",
+  post_underperformance: "Слабые посты",
+  theme_sentiment: "Темы и тональность",
+  theme_interest: "Темы и интерес аудитории",
+  topic_report: "Тематический отчет",
+  excel_export: "Табличный режим",
+  mixed: "Смешанный режим",
+};
 
 export function ReportSummaryCard({
   summaryText,
   meta,
   stats,
   takeaways,
+  analysisMode,
 }: {
   summaryText: string | null;
   meta: {
@@ -18,6 +31,7 @@ export function ReportSummaryCard({
     analyzed_comments: number;
   };
   takeaways?: string[];
+  analysisMode?: AnalysisMode;
 }) {
   return (
     <Card className="border-white/10 bg-card/70 backdrop-blur">
@@ -37,6 +51,8 @@ export function ReportSummaryCard({
             value={`${stats.total_posts} постов / ${stats.analyzed_comments} релевантных комментариев`}
           />
         </div>
+
+        {analysisMode ? <ModeBadge mode={analysisMode} /> : null}
 
         {takeaways?.length ? (
           <div className="space-y-2 rounded-2xl border border-cyan-400/15 bg-cyan-400/[0.06] px-4 py-4">
@@ -66,6 +82,14 @@ function InfoItem({ label, value }: { label: string; value: string }) {
     <div className="rounded-xl border border-border/60 bg-background/55 px-3 py-3">
       <div className="text-xs uppercase tracking-wide text-muted-foreground">{label}</div>
       <div className="mt-1 font-medium">{value}</div>
+    </div>
+  );
+}
+
+function ModeBadge({ mode }: { mode: AnalysisMode }) {
+  return (
+    <div className="inline-flex rounded-full border border-white/10 bg-background/40 px-3 py-1 text-xs font-medium text-muted-foreground">
+      Режим анализа: {MODE_LABELS[mode]}
     </div>
   );
 }

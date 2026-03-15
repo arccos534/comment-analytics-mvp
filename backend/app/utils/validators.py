@@ -25,6 +25,17 @@ def split_urls(raw_values: list[str]) -> list[str]:
 def detect_platform_and_type(url: str) -> ProviderValidationResult:
     normalized = normalize_url(url)
 
+    if not normalized:
+        return ProviderValidationResult(
+            url=url,
+            normalized_url="",
+            platform=None,
+            source_type=None,
+            is_valid=False,
+            can_save=False,
+            reason="Source URL is empty",
+        )
+
     if match := TELEGRAM_POST_RE.match(normalized):
         slug = match.group("slug")
         post_id = match.group("post_id")

@@ -17,8 +17,8 @@ from app.core.config import get_settings
 
 logger = logging.getLogger(__name__)
 
-SUMMARY_CACHE_VERSION = "v2"
-SUMMARY_PROMPT_VERSION = "structured-summary-v1"
+SUMMARY_CACHE_VERSION = "v3"
+SUMMARY_PROMPT_VERSION = "structured-summary-v2"
 THEME_CACHE_VERSION = "v2"
 THEME_PROMPT_VERSION = "theme-labels-v1"
 
@@ -390,15 +390,22 @@ class SummaryGenerator:
     def generate_summary_bundle(self, report_json: dict, prompt_text: str | None = None) -> tuple[dict, str]:
         summary_payload = self._build_summary_payload(report_json, prompt_text)
         llm_bundle = self._generate_llm_summary_bundle(report_json, prompt_text, summary_payload)
-        fallback_takeaways = self._build_takeaways(report_json, summary_payload, prompt_text)
-        summary_text = (llm_bundle or {}).get("overview") or self._build_fallback_summary(
+        fallback_takeaways = self._build_takeaways_v2(report_json, summary_payload, prompt_text)
+        summary_text = (llm_bundle or {}).get("overview") or self._build_fallback_summary_v2(
             report_json,
             prompt_text,
             summary_payload,
         )
+        request = summary_payload.get("analysis_request", {}) or {}
         return {
             "overview": summary_text,
             "takeaways": (llm_bundle or {}).get("takeaways") or fallback_takeaways,
+            "analysis_mode": (llm_bundle or {}).get("analysis_mode") or request.get("primary_mode") or "topic_report",
+            "primary_mode": request.get("primary_mode") or "topic_report",
+            "secondary_modes": request.get("secondary_modes") or [],
+            "analysis_axes": request.get("analysis_axes") or [],
+            "request_contract": request.get("request_contract") or [],
+            "answer_strategy": request.get("answer_strategy") or {},
             "confidence_assessment": summary_payload.get("confidence_assessment", {}),
             "theme_reaction_map": summary_payload.get("theme_reaction_map", []),
             "focus_evidence": summary_payload.get("focus_evidence", []),
@@ -495,28 +502,32 @@ class SummaryGenerator:
 
     def _build_structured_summary_system_prompt(self) -> str:
         return (
-            "You prepare the final analytics answer in Russian.\n"
-            "Return a valid JSON object only.\n"
+            "Ты — аналитик социальных медиа для Telegram-каналов и сообществ VK.\n"
+            "Верни только валидный JSON.\n"
             "JSON schema:\n"
             "{\n"
             '  "overview": "string",\n'
-            '  "takeaways": ["string", "string"],\n'
-            '  "analysis_mode": "string"\n'
+            '  "takeaways": ["string"],\n'
+            '  "analysis_mode": "source_comparison|post_popularity|post_underperformance|theme_sentiment|theme_interest|topic_report|excel_export|mixed"\n'
             "}\n"
-            "Requirements:\n"
-            "- overview must directly answer the user prompt in the first sentence.\n"
-            "- adapt the answer to the actual request type: source/channel comparison, post/news ranking, theme analysis, comment reaction, mixed analysis.\n"
-            "- if analysis_request.theme_of_posts is present, rely only on theme-scoped evidence; do not pull unrelated stories.\n"
-            "- if analysis_request.analysis_axes indicates source_metrics without post_scope/comment_reaction, answer at source/channel level, not through one post.\n"
-            "- if prompt_mode contains most_discussed_news and top_discussed_posts is not empty, explicitly name the leading post.\n"
-            "- if prompt_mode contains most_reacted_post and top_reacted_posts is not empty, explicitly name the leading post by reactions or likes, not by comments.\n"
-            "- if prompt_mode contains most_viewed_post and top_viewed_posts is not empty, explicitly name the leading post by views.\n"
-            "- use focus_evidence and theme_reaction_map when they are relevant to the prompt.\n"
-            "- do not invent themes from raw word fragments or single noisy tokens.\n"
-            "- do not mention generic topics like 'general discussion' unless they are truly the only defensible conclusion.\n"
-            "- if confidence is low or the evidence is sparse, say that clearly and keep claims narrow.\n"
-            "- takeaways must contain 1 to 3 concise points, each useful and tied to the current prompt only.\n"
-            "- no markdown fences, no commentary outside JSON."
+            "Правила:\n"
+            "- Сначала определи основной режим ответа по analysis_request.primary_mode. Если в payload есть secondary_modes, учитывай их как вторичный слой.\n"
+            "- Первый абзац overview должен дать прямой ответ на запрос без вводной фразы вроде 'по выборке видна картина'.\n"
+            "- Если режим source_comparison, сравнивай именно источники, а не отдельные посты.\n"
+            "- Если режим post_popularity, опирайся в первую очередь на views и likes_or_reactions, комментарии используй как дополнительный сигнал.\n"
+            "- Если режим post_underperformance, покажи аутсайдеров и объясни, чем они уступают лидерам.\n"
+            "- Если режим theme_sentiment, назови темы с позитивной и негативной реакцией и объясни причины.\n"
+            "- Если режим theme_interest, назови темы, которые собирают наибольший интерес или резонанс.\n"
+            "- Если режим topic_report, дай содержательный отчет по теме или запросу пользователя.\n"
+            "- Если analysis_request.theme_of_posts задана, используй только theme-scoped evidence и не подмешивай посторонние темы.\n"
+            "- Для Telegram поле likes_count означает реакции на посте; для VK — лайки.\n"
+            "- Не выдумывай факты и не придумывай темы из обрывков слов. Темы должны звучать как короткие редакторские заголовки.\n"
+            "- Если confidence_assessment.level = low, делай осторожные формулировки и явно помечай вывод как предварительный.\n"
+            "- Если primary_mode касается популярности постов, опирайся на top_success_posts, bottom_success_posts, top_reacted_posts, top_viewed_posts и style_gap.\n"
+            "- Если primary_mode касается сравнения источников, опирайся на source_comparison_map и их средние метрики на пост.\n"
+            "- Если primary_mode касается тем, используй prompt_related_theme_map, theme_reaction_map, focus_evidence и релевантные посты.\n"
+            "- Takeaways должны содержать от 1 до 3 коротких и полезных выводов строго по текущему запросу.\n"
+            "- В overview можно делать короткие абзацы, но без markdown-разметки и без повторения prompt дословно."
         )
 
     def _parse_summary_bundle(self, raw_value: str) -> dict | None:
@@ -550,7 +561,7 @@ class SummaryGenerator:
         return {
             "overview": overview,
             "takeaways": takeaways[:3],
-            "analysis_mode": str(payload.get("analysis_mode") or "").strip(),
+            "analysis_mode": str(payload.get("analysis_mode") or "").strip() or "topic_report",
         }
 
     def _build_system_prompt(self) -> str:
@@ -608,6 +619,8 @@ class SummaryGenerator:
         matched_posts = (posts.get("matched", []) or [])[:8]
         top_popular = (posts.get("top_popular", []) or [])[:5]
         top_unpopular = (posts.get("top_unpopular", []) or [])[:5]
+        success_top_bucket = (posts.get("success_top_bucket", []) or [])[:8]
+        success_bottom_bucket = (posts.get("success_bottom_bucket", []) or [])[:8]
         source_comparison = (report_json.get("sources", {}).get("comparison", []) or [])[:8]
         declared_theme = (report_json.get("meta", {}).get("post_theme") or "").strip() or None
         has_explicit_scope = bool(declared_theme or report_json.get("meta", {}).get("post_keywords"))
@@ -620,7 +633,12 @@ class SummaryGenerator:
         theme_basis_posts = theme_scoped_posts if declared_theme else (matched_posts + top_popular + top_unpopular)
         top_discussed = sorted(
             theme_scoped_posts if declared_theme else (theme_scoped_posts or matched_posts),
-            key=lambda post: (post.get("comments_count", 0), post.get("score", 0)),
+            key=lambda post: (
+                int(post.get("comments_count", 0) or 0),
+                int(post.get("likes_count", 0) or 0),
+                int(post.get("views_count", 0) or 0),
+                int(post.get("reposts_count", 0) or 0),
+            ),
             reverse=True,
         )[:5]
         ranking_posts = theme_basis_posts or matched_posts or top_popular or top_unpopular
@@ -685,6 +703,23 @@ class SummaryGenerator:
         )
         prompt_mode = prompt_intent.prompt_mode
         prompt_focus_terms = prompt_intent.focus_terms
+        theme_reaction_map = self._build_theme_reaction_map(
+            derived_post_themes,
+            theme_basis_posts if declared_theme else matched_posts,
+            [] if declared_theme else top_popular,
+            [] if declared_theme else top_unpopular,
+        )
+        focus_evidence = self._build_prompt_focus_evidence(
+            prompt_focus_terms,
+            theme_scoped_posts if declared_theme else matched_posts,
+            [] if declared_theme else top_popular,
+            [] if declared_theme else top_unpopular,
+        )
+        prompt_related_theme_map = self._filter_prompt_related_themes(
+            theme_reaction_map,
+            focus_evidence,
+            prompt_focus_terms,
+        )
 
         return {
             "analysis_request": {
@@ -695,6 +730,8 @@ class SummaryGenerator:
                 "user_prompt": (prompt_text or "").strip(),
                 "analysis_axes": analysis_axes,
                 "prompt_mode": prompt_mode,
+                "primary_mode": prompt_intent.primary_mode,
+                "secondary_modes": prompt_intent.secondary_modes,
                 "request_contract": prompt_intent.request_contract,
                 "answer_strategy": prompt_intent.answer_strategy,
                 "prompt_focus_terms": prompt_focus_terms,
@@ -712,19 +749,10 @@ class SummaryGenerator:
             "sentiment_distribution": report_json.get("sentiment", {}),
             "derived_post_themes": derived_post_themes,
             "heuristic_post_themes": heuristic_post_themes,
-            "theme_reaction_map": self._build_theme_reaction_map(
-                derived_post_themes,
-                theme_basis_posts if declared_theme else matched_posts,
-                [] if declared_theme else top_popular,
-                [] if declared_theme else top_unpopular,
-            ),
+            "theme_reaction_map": theme_reaction_map,
+            "prompt_related_theme_map": prompt_related_theme_map,
             "comment_topics": meaningful_topics,
-            "focus_evidence": self._build_prompt_focus_evidence(
-                prompt_focus_terms,
-                theme_scoped_posts if declared_theme else matched_posts,
-                [] if declared_theme else top_popular,
-                [] if declared_theme else top_unpopular,
-            ),
+            "focus_evidence": focus_evidence,
             "source_comparison_map": source_comparison,
             "positive_signals": {
                 "patterns": report_json.get("insights", {}).get("liked_patterns", []),
@@ -748,6 +776,12 @@ class SummaryGenerator:
             "theme_scoped_posts": [self._compact_post(post) for post in (theme_scoped_posts[:8] if theme_scoped_posts else [])],
             "top_popular_posts": [self._compact_post(post) for post in top_popular],
             "top_unpopular_posts": [self._compact_post(post) for post in top_unpopular],
+            "top_success_posts": [self._compact_post(post) for post in success_top_bucket],
+            "bottom_success_posts": [self._compact_post(post) for post in success_bottom_bucket],
+            "style_gap": {
+                "top_success": self._build_post_style_summary(success_top_bucket),
+                "bottom_success": self._build_post_style_summary(success_bottom_bucket),
+            },
         }
 
     def _filter_posts_for_declared_theme(self, posts: list[dict], declared_theme: str | None) -> list[dict]:
@@ -818,18 +852,7 @@ class SummaryGenerator:
                 messages=[
                     {
                         "role": "system",
-                        "content": (
-                            "You are naming themes for a Russian-language media analytics report. "
-                            "Return only a JSON array with 3 to 6 short Russian theme labels. "
-                            "Each label must be a clean editorial theme title, not a raw fragment of a headline. "
-                            "Use 2 to 5 words, prefer noun phrases, avoid imperative wording, avoid duplicates, "
-                            "avoid channel names, city names, filler words, dates, and generic words like post, news, discussion. "
-                            "If several posts describe the same story, merge them into one theme. "
-                            "Bad labels: '???????? ????????????? ????', '????????? ??????', '?????????? ???????'. "
-                            "Good labels: '????????? ???? ? ????????? ??????', '??????????? ? ?????? ?? ????', "
-                            "'??????????? ????????? ? ???????????'. "
-                            "If the request already contains a theme or focus, prefer themes directly related to that request."
-                        ),
+                        "content": self._build_theme_label_system_prompt(),
                     },
                     {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
                 ],
@@ -891,22 +914,14 @@ class SummaryGenerator:
             matching = [post for post in posts if self._theme_matches_post(theme, post)]
             if not matching:
                 continue
+            views_total = sum(int(post.get("views_count", 0) or 0) for post in matching)
             comments_total = sum(int(post.get("comments_count", 0) or 0) for post in matching)
             likes_total = sum(int(post.get("likes_count", 0) or 0) for post in matching)
             reposts_total = sum(int(post.get("reposts_count", 0) or 0) for post in matching)
             positive_total = sum(int(post.get("positive_relevant_comments_count", 0) or 0) for post in matching)
             negative_total = sum(int(post.get("negative_relevant_comments_count", 0) or 0) for post in matching)
             neutral_total = sum(int(post.get("neutral_relevant_comments_count", 0) or 0) for post in matching)
-            leader = sorted(
-                matching,
-                key=lambda post: (
-                    int(post.get("comments_count", 0) or 0),
-                    int(post.get("likes_count", 0) or 0),
-                    int(post.get("reposts_count", 0) or 0),
-                    float(post.get("score", 0) or 0),
-                ),
-                reverse=True,
-            )[0]
+            leader = sorted(matching, key=self._post_success_key, reverse=True)[0]
             theme_label = self._normalize_theme_for_display(theme, matching)
             if not theme_label:
                 continue
@@ -921,6 +936,7 @@ class SummaryGenerator:
                     "theme": theme_label,
                     "platform": leader.get("platform"),
                     "posts_count": len(matching),
+                    "views_count": views_total,
                     "comments_count": comments_total,
                     "likes_count": likes_total,
                     "reposts_count": reposts_total,
@@ -966,9 +982,9 @@ class SummaryGenerator:
 
             rank = (
                 len(matched_terms),
-                int(post.get("comments_count", 0) or 0),
-                int(post.get("likes_count", 0) or 0) + int(post.get("reposts_count", 0) or 0),
-                float(post.get("score", 0) or 0),
+                int(post.get("views_count", 0) or 0),
+                int(post.get("likes_count", 0) or 0),
+                int(post.get("comments_count", 0) or 0) + int(post.get("reposts_count", 0) or 0),
             )
             scored.append(
                 (
@@ -1533,6 +1549,8 @@ class SummaryGenerator:
             "post_url": post.get("post_url"),
             "post_text": self._shorten(post.get("post_text") or "", limit=220),
             "platform": post.get("platform"),
+            "source_title": post.get("source_title"),
+            "source_url": post.get("source_url"),
             "comments_count": post.get("comments_count", 0),
             "relevant_comments_count": post.get("relevant_comments_count", 0),
             "positive_relevant_comments_count": post.get("positive_relevant_comments_count", 0),
@@ -1551,6 +1569,158 @@ class SummaryGenerator:
     def _engagement_metric_label(self, post: dict) -> str:
         platform = (post.get("platform") or "") or ((post.get("leading_post") or {}).get("platform") or "")
         return "реакций" if platform == "telegram" else "лайков"
+
+    def _source_metric_label(self, source: dict) -> str:
+        return "реакций" if (source.get("platform") or "").lower() == "telegram" else "лайков"
+
+    def _post_success_key(self, post: dict) -> tuple[int, int, int, int]:
+        return (
+            int(post.get("views_count", 0) or 0),
+            int(post.get("likes_count", 0) or 0),
+            int(post.get("comments_count", 0) or 0),
+            int(post.get("reposts_count", 0) or 0),
+        )
+
+    def _post_reaction_key(self, post: dict) -> tuple[int, int, int, int]:
+        return (
+            int(post.get("likes_count", 0) or 0),
+            int(post.get("views_count", 0) or 0),
+            int(post.get("comments_count", 0) or 0),
+            int(post.get("reposts_count", 0) or 0),
+        )
+
+    def _post_discussion_key(self, post: dict) -> tuple[int, int, int, int]:
+        return (
+            int(post.get("comments_count", 0) or 0),
+            int(post.get("likes_count", 0) or 0),
+            int(post.get("views_count", 0) or 0),
+            int(post.get("reposts_count", 0) or 0),
+        )
+
+    def _source_success_key(self, source: dict) -> tuple[float, float, float, float, int]:
+        return (
+            float(source.get("avg_views_per_post", 0) or 0),
+            float(source.get("avg_likes_per_post", 0) or 0),
+            float(source.get("avg_comments_per_post", 0) or 0),
+            float(source.get("avg_reposts_per_post", 0) or 0),
+            int(source.get("subscriber_count", 0) or 0),
+        )
+
+    def _format_post_metrics(self, post: dict, priority: str = "success") -> str:
+        metric_label = self._engagement_metric_label(post)
+        metrics = {
+            "views": f"{int(post.get('views_count', 0) or 0)} просмотров",
+            "likes": f"{int(post.get('likes_count', 0) or 0)} {metric_label}",
+            "comments": f"{int(post.get('comments_count', 0) or 0)} комментариев",
+            "reposts": f"{int(post.get('reposts_count', 0) or 0)} репостов",
+        }
+        order_map = {
+            "views": ["views", "likes", "comments", "reposts"],
+            "reactions": ["likes", "views", "comments", "reposts"],
+            "comments": ["comments", "likes", "views", "reposts"],
+            "success": ["views", "likes", "comments", "reposts"],
+        }
+        ordered_keys = order_map.get(priority, order_map["success"])
+        parts: list[str] = []
+        for key in ordered_keys:
+            if key == "views" and int(post.get("views_count", 0) or 0) <= 0:
+                continue
+            parts.append(metrics[key])
+        return self._join_list(parts)
+
+    def _format_source_metrics(self, source: dict) -> str:
+        metric_label = self._source_metric_label(source)
+        parts: list[str] = []
+        avg_views = round(float(source.get("avg_views_per_post", 0) or 0))
+        avg_likes = round(float(source.get("avg_likes_per_post", 0) or 0))
+        avg_comments = round(float(source.get("avg_comments_per_post", 0) or 0))
+        avg_reposts = round(float(source.get("avg_reposts_per_post", 0) or 0))
+        if avg_views > 0:
+            parts.append(f"{avg_views} просмотров на пост")
+        parts.append(f"{avg_likes} {metric_label} на пост")
+        parts.append(f"{avg_comments} комментариев на пост")
+        parts.append(f"{avg_reposts} репостов на пост")
+        if int(source.get("subscriber_count", 0) or 0) > 0:
+            parts.append(f"{int(source.get('subscriber_count', 0) or 0)} подписчиков")
+        return self._join_list(parts)
+
+    def _build_style_gap_explanation(self, style_gap: dict) -> str:
+        top = style_gap.get("top_success") or {}
+        bottom = style_gap.get("bottom_success") or {}
+        if int(top.get("posts_count", 0) or 0) <= 0 or int(bottom.get("posts_count", 0) or 0) <= 0:
+            return ""
+
+        reasons: list[str] = []
+        top_number_share = float(top.get("number_share", 0.0) or 0.0)
+        bottom_number_share = float(bottom.get("number_share", 0.0) or 0.0)
+        top_question_share = float(top.get("question_share", 0.0) or 0.0)
+        bottom_question_share = float(bottom.get("question_share", 0.0) or 0.0)
+        top_exclamation_share = float(top.get("exclamation_share", 0.0) or 0.0)
+        bottom_exclamation_share = float(bottom.get("exclamation_share", 0.0) or 0.0)
+        top_emoji_share = float(top.get("emoji_share", 0.0) or 0.0)
+        bottom_emoji_share = float(bottom.get("emoji_share", 0.0) or 0.0)
+        top_word_count = float(top.get("avg_word_count", 0) or 0)
+        bottom_word_count = float(bottom.get("avg_word_count", 0) or 0)
+
+        if top_number_share - bottom_number_share >= 0.2:
+            reasons.append("чаще содержат конкретные цифры и фактуру")
+        if top_question_share - bottom_question_share >= 0.2:
+            reasons.append("чаще вовлекают аудиторию вопросом")
+        if top_exclamation_share - bottom_exclamation_share >= 0.2:
+            reasons.append("подают тему эмоциональнее")
+        if top_emoji_share - bottom_emoji_share >= 0.2:
+            reasons.append("чаще используют эмодзи как часть подачи")
+        if top_word_count - bottom_word_count >= 12:
+            reasons.append("обычно дают больше деталей по сюжету")
+        elif bottom_word_count - top_word_count >= 12:
+            reasons.append("обычно короче и быстрее считываются")
+
+        if not reasons:
+            return ""
+        return f"По подаче лидеры отличаются тем, что {self._join_list(reasons[:3])}."
+
+    def _build_post_style_summary(self, posts: list[dict]) -> dict:
+        if not posts:
+            return {
+                "posts_count": 0,
+                "avg_text_length": 0,
+                "avg_word_count": 0,
+                "emoji_share": 0.0,
+                "question_share": 0.0,
+                "exclamation_share": 0.0,
+                "number_share": 0.0,
+            }
+
+        emoji_count = 0
+        question_count = 0
+        exclamation_count = 0
+        number_count = 0
+        total_length = 0
+        total_words = 0
+
+        for post in posts:
+            text = (post.get("post_text") or "").strip()
+            total_length += len(text)
+            total_words += len(re.findall(r"[a-zа-я0-9-]+", self._normalize_text(text)))
+            if re.search(r"[\U0001F300-\U0001FAFF]", text):
+                emoji_count += 1
+            if "?" in text:
+                question_count += 1
+            if "!" in text:
+                exclamation_count += 1
+            if re.search(r"\d", text):
+                number_count += 1
+
+        posts_count = max(len(posts), 1)
+        return {
+            "posts_count": len(posts),
+            "avg_text_length": round(total_length / posts_count, 1),
+            "avg_word_count": round(total_words / posts_count, 1),
+            "emoji_share": round(emoji_count / posts_count, 2),
+            "question_share": round(question_count / posts_count, 2),
+            "exclamation_share": round(exclamation_count / posts_count, 2),
+            "number_share": round(number_count / posts_count, 2),
+        }
 
     def _filter_prompt_related_themes(
         self,
@@ -1871,6 +2041,344 @@ class SummaryGenerator:
 
         return "".join(parts).strip()
 
+    def _build_takeaways_v2(self, report_json: dict, payload: dict, prompt_text: str | None) -> list[str]:
+        stats = report_json.get("stats", {})
+        analyzed_comments = int(stats.get("analyzed_comments", 0) or 0)
+        total_posts = int(stats.get("total_posts", 0) or 0)
+        confidence = payload.get("confidence_assessment", {})
+        request = payload.get("analysis_request", {}) or {}
+        prompt_modes = set(request.get("prompt_mode", []) or [])
+        primary_mode = request.get("primary_mode") or "topic_report"
+        prompt_focus_terms = request.get("prompt_focus_terms", []) or []
+
+        focus_evidence = payload.get("focus_evidence", []) or []
+        source_comparison = payload.get("source_comparison_map", []) or []
+        top_discussed_posts = payload.get("top_discussed_posts", []) or []
+        top_reacted_posts = payload.get("top_reacted_posts", []) or []
+        least_reacted_posts = payload.get("least_reacted_posts", []) or []
+        top_viewed_posts = payload.get("top_viewed_posts", []) or []
+        least_viewed_posts = payload.get("least_viewed_posts", []) or []
+        top_success_posts = payload.get("top_success_posts", []) or []
+        bottom_success_posts = payload.get("bottom_success_posts", []) or []
+        theme_map = payload.get("prompt_related_theme_map", []) or self._filter_prompt_related_themes(
+            payload.get("theme_reaction_map", []) or [],
+            focus_evidence,
+            prompt_focus_terms,
+        ) or payload.get("theme_reaction_map", []) or []
+        style_gap = payload.get("style_gap", {}) or {}
+
+        if request.get("theme_of_posts"):
+            top_discussed_posts = payload.get("theme_scoped_posts", []) or top_discussed_posts
+
+        takeaways: list[str] = []
+
+        if confidence.get("level") == "low":
+            takeaways.append(
+                f"Выборка небольшая: {total_posts} постов и {analyzed_comments} релевантных комментариев, поэтому выводы предварительные."
+            )
+
+        if primary_mode == "source_comparison" and source_comparison:
+            ranked_sources = sorted(source_comparison, key=self._source_success_key, reverse=True)
+            lead_source = ranked_sources[0]
+            takeaways.append(
+                f"По совокупности метрик лидирует источник «{lead_source.get('source_title') or lead_source.get('source_url') or 'без названия'}»: "
+                f"в среднем {self._format_source_metrics(lead_source)}."
+            )
+            if len(ranked_sources) > 1:
+                runner_up = ranked_sources[1]
+                takeaways.append(
+                    f"Ближайший к нему по эффективности источник — «{runner_up.get('source_title') or runner_up.get('source_url') or 'без названия'}»."
+                )
+            return list(dict.fromkeys(takeaways))[:3]
+
+        if focus_evidence and primary_mode in {"topic_report", "mixed", "theme_interest", "theme_sentiment"}:
+            lead = focus_evidence[0]
+            matched_terms = ", ".join(lead.get("matched_terms", [])[:3])
+            post = lead.get("post", {})
+            post_text = post.get("post_text") or "ключевой публикации"
+            if matched_terms:
+                takeaways.append(
+                    f"Ближе всего к запросу относится сюжет «{post_text}» — он напрямую связан с темами: {matched_terms}."
+                )
+
+        if primary_mode == "post_popularity":
+            if ("most_reacted_post" in prompt_modes or "highest_reactions" in prompt_modes) and top_reacted_posts:
+                lead_post = sorted(top_reacted_posts, key=self._post_reaction_key, reverse=True)[0]
+                takeaways.append(
+                    f"По количеству реакций лидирует пост «{lead_post['post_text']}»: {self._format_post_metrics(lead_post, priority='reactions')}."
+                )
+            elif ("most_viewed_post" in prompt_modes or "highest_views" in prompt_modes) and top_viewed_posts:
+                lead_post = sorted(top_viewed_posts, key=self._post_success_key, reverse=True)[0]
+                takeaways.append(
+                    f"По охвату лидирует пост «{lead_post['post_text']}»: {self._format_post_metrics(lead_post, priority='views')}."
+                )
+            elif "most_discussed_news" in prompt_modes and top_discussed_posts:
+                lead_post = sorted(top_discussed_posts, key=self._post_discussion_key, reverse=True)[0]
+                takeaways.append(
+                    f"По обсуждаемости лидирует пост «{lead_post['post_text']}»: {self._format_post_metrics(lead_post, priority='comments')}."
+                )
+            elif top_success_posts:
+                lead_post = sorted(top_success_posts, key=self._post_success_key, reverse=True)[0]
+                takeaways.append(
+                    f"В верхние 20% по успешности входит пост «{lead_post['post_text']}»: {self._format_post_metrics(lead_post, priority='success')}."
+                )
+
+            if bottom_success_posts:
+                weakest_post = sorted(bottom_success_posts, key=self._post_success_key)[0]
+                takeaways.append(
+                    f"В нижние 20% по успешности попадает пост «{weakest_post['post_text']}»: {self._format_post_metrics(weakest_post, priority='success')}."
+                )
+
+        elif primary_mode == "post_underperformance":
+            if ("least_reacted_post" in prompt_modes or "lowest_reactions" in prompt_modes) and least_reacted_posts:
+                weakest_post = sorted(least_reacted_posts, key=self._post_reaction_key)[0]
+                takeaways.append(
+                    f"Наименьший отклик по реакциям у поста «{weakest_post['post_text']}»: {self._format_post_metrics(weakest_post, priority='reactions')}."
+                )
+            elif ("least_viewed_post" in prompt_modes or "lowest_views" in prompt_modes) and least_viewed_posts:
+                weakest_post = sorted(least_viewed_posts, key=self._post_success_key)[0]
+                takeaways.append(
+                    f"Наименьший охват у поста «{weakest_post['post_text']}»: {self._format_post_metrics(weakest_post, priority='views')}."
+                )
+            elif bottom_success_posts:
+                weakest_post = sorted(bottom_success_posts, key=self._post_success_key)[0]
+                takeaways.append(
+                    f"Наименее успешным в текущем срезе выглядит пост «{weakest_post['post_text']}»: {self._format_post_metrics(weakest_post, priority='success')}."
+                )
+            if top_success_posts:
+                leader_post = sorted(top_success_posts, key=self._post_success_key, reverse=True)[0]
+                takeaways.append(
+                    f"Для сравнения: лидер верхних 20% — «{leader_post['post_text']}» с метриками {self._format_post_metrics(leader_post, priority='success')}."
+                )
+
+        elif theme_map:
+            leader_theme = sorted(
+                theme_map,
+                key=lambda item: (
+                    int(item.get("likes_count", 0) or 0),
+                    int(item.get("comments_count", 0) or 0),
+                    int(item.get("reposts_count", 0) or 0),
+                ),
+                reverse=True,
+            )[0]
+            metric_label = self._engagement_metric_label(leader_theme)
+            takeaways.append(
+                f"Самый сильный отклик вызывает тема «{leader_theme['theme']}»: {leader_theme['comments_count']} комментариев, {leader_theme['likes_count']} {metric_label} и {leader_theme['reposts_count']} репостов."
+            )
+            if primary_mode in {"theme_sentiment", "mixed", "topic_report"}:
+                strongest_negative = next(
+                    (item for item in theme_map if item.get("reaction_tendency") == "скорее негативная"),
+                    None,
+                )
+                strongest_positive = next(
+                    (item for item in theme_map if item.get("reaction_tendency") == "скорее позитивная"),
+                    None,
+                )
+                if strongest_negative:
+                    takeaways.append(f"Наиболее негативная реакция заметна вокруг темы «{strongest_negative['theme']}».")
+                elif strongest_positive:
+                    takeaways.append(f"Наиболее позитивная реакция заметна вокруг темы «{strongest_positive['theme']}».")
+
+        elif top_discussed_posts:
+            lead_post = sorted(top_discussed_posts, key=self._post_discussion_key, reverse=True)[0]
+            takeaways.append(
+                f"Наиболее обсуждаемым оказался пост «{lead_post['post_text']}» с {lead_post['comments_count']} комментариями."
+            )
+
+        style_gap_explanation = self._build_style_gap_explanation(style_gap)
+        if style_gap_explanation and primary_mode in {"post_popularity", "post_underperformance", "mixed", "topic_report"}:
+            takeaways.append(style_gap_explanation)
+
+        if not takeaways and prompt_text:
+            takeaways.append(f"По запросу «{prompt_text.strip()}» в выборке пока не хватает устойчивых аналитических сигналов.")
+
+        return list(dict.fromkeys(item for item in takeaways if item))[:3]
+
+    def _build_fallback_summary_v2(self, report_json: dict, prompt_text: str | None, payload: dict) -> str:
+        stats = report_json.get("stats", {})
+        sentiment = report_json.get("sentiment", {})
+        request = payload["analysis_request"]
+        primary_mode = request.get("primary_mode") or "topic_report"
+        prompt_modes = set(request.get("prompt_mode", []) or [])
+        declared_theme = request.get("theme_of_posts")
+
+        total_posts = int(stats.get("total_posts", 0) or 0)
+        analyzed_comments = int(stats.get("analyzed_comments", 0) or 0)
+        derived_post_themes = payload.get("derived_post_themes", []) or []
+        theme_map = payload.get("prompt_related_theme_map", []) or payload.get("theme_reaction_map", []) or []
+        focus_evidence = payload.get("focus_evidence", []) or []
+        source_comparison = payload.get("source_comparison_map", []) or []
+        top_discussed_posts = payload.get("top_discussed_posts", []) or []
+        top_reacted_posts = payload.get("top_reacted_posts", []) or []
+        least_reacted_posts = payload.get("least_reacted_posts", []) or []
+        top_viewed_posts = payload.get("top_viewed_posts", []) or []
+        least_viewed_posts = payload.get("least_viewed_posts", []) or []
+        top_success_posts = payload.get("top_success_posts", []) or []
+        bottom_success_posts = payload.get("bottom_success_posts", []) or []
+        style_gap = payload.get("style_gap", {}) or {}
+        confidence = payload.get("confidence_assessment", {}) or {}
+
+        if analyzed_comments <= 0 and total_posts <= 0 and not source_comparison:
+            return (
+                "По текущему срезу не найдено постов или комментариев, на которых можно опереться. "
+                "Для содержательного ответа нужно расширить период, тему или набор источников."
+            )
+
+        paragraphs: list[str] = []
+
+        if primary_mode == "source_comparison" and source_comparison:
+            ranked_sources = sorted(source_comparison, key=self._source_success_key, reverse=True)
+            lead = ranked_sources[0]
+            direct = (
+                f"Лидирующим источником по активности аудитории выглядит «{lead.get('source_title') or lead.get('source_url') or 'без названия'}». "
+                f"По его публикациям в среднем видно {self._format_source_metrics(lead)}."
+            )
+            if len(ranked_sources) > 1:
+                runner_up = ranked_sources[1]
+                direct += (
+                    f" Ближайший к нему источник — «{runner_up.get('source_title') or runner_up.get('source_url') or 'без названия'}», "
+                    "но его средние метрики на пост ниже."
+                )
+            paragraphs.append(direct)
+
+        elif primary_mode == "post_popularity":
+            if ("most_reacted_post" in prompt_modes or "highest_reactions" in prompt_modes) and top_reacted_posts:
+                lead = sorted(top_reacted_posts, key=self._post_reaction_key, reverse=True)[0]
+                paragraphs.append(
+                    f"Постом с наибольшим количеством реакций выглядит «{lead['post_text']}». "
+                    f"Он собрал {self._format_post_metrics(lead, priority='reactions')}."
+                )
+            elif ("most_viewed_post" in prompt_modes or "highest_views" in prompt_modes) and top_viewed_posts:
+                lead = sorted(top_viewed_posts, key=self._post_success_key, reverse=True)[0]
+                paragraphs.append(
+                    f"Постом с наибольшим охватом выглядит «{lead['post_text']}». "
+                    f"Он собрал {self._format_post_metrics(lead, priority='views')}."
+                )
+            elif "most_discussed_news" in prompt_modes and top_discussed_posts:
+                lead = sorted(top_discussed_posts, key=self._post_discussion_key, reverse=True)[0]
+                paragraphs.append(
+                    f"Самой обсуждаемой публикацией выглядит «{lead['post_text']}». "
+                    f"По ней видно {self._format_post_metrics(lead, priority='comments')}."
+                )
+            elif top_success_posts:
+                lead = sorted(top_success_posts, key=self._post_success_key, reverse=True)[0]
+                paragraphs.append(
+                    f"Лидером по успешности в текущем срезе выглядит пост «{lead['post_text']}». "
+                    f"Он собрал {self._format_post_metrics(lead, priority='success')}."
+                )
+
+            if bottom_success_posts:
+                weakest = sorted(bottom_success_posts, key=self._post_success_key)[0]
+                paragraphs.append(
+                    f"В нижние 20% по успешности попадает пост «{weakest['post_text']}» с метриками {self._format_post_metrics(weakest, priority='success')}."
+                )
+
+        elif primary_mode == "post_underperformance":
+            if ("least_reacted_post" in prompt_modes or "lowest_reactions" in prompt_modes) and least_reacted_posts:
+                weakest = sorted(least_reacted_posts, key=self._post_reaction_key)[0]
+                paragraphs.append(
+                    f"Наименьший отклик по реакциям у поста «{weakest['post_text']}»: {self._format_post_metrics(weakest, priority='reactions')}."
+                )
+            elif ("least_viewed_post" in prompt_modes or "lowest_views" in prompt_modes) and least_viewed_posts:
+                weakest = sorted(least_viewed_posts, key=self._post_success_key)[0]
+                paragraphs.append(
+                    f"Наименьший охват у поста «{weakest['post_text']}»: {self._format_post_metrics(weakest, priority='views')}."
+                )
+            elif bottom_success_posts:
+                weakest = sorted(bottom_success_posts, key=self._post_success_key)[0]
+                paragraphs.append(
+                    f"Наименее успешным постом в текущем срезе выглядит «{weakest['post_text']}». "
+                    f"У него {self._format_post_metrics(weakest, priority='success')}."
+                )
+            if top_success_posts:
+                leader = sorted(top_success_posts, key=self._post_success_key, reverse=True)[0]
+                paragraphs.append(
+                    f"Для сравнения, лидер верхних 20% выглядит как «{leader['post_text']}» с метриками {self._format_post_metrics(leader, priority='success')}."
+                )
+
+        elif primary_mode == "theme_sentiment" and theme_map:
+            positive_theme = next((item for item in theme_map if item.get("reaction_tendency") == "скорее позитивная"), None)
+            negative_theme = next((item for item in theme_map if item.get("reaction_tendency") == "скорее негативная"), None)
+            if positive_theme and negative_theme:
+                paragraphs.append(
+                    f"Наиболее позитивную реакцию вызывает тема «{positive_theme['theme']}», а наиболее негативную — тема «{negative_theme['theme']}»."
+                )
+            elif negative_theme:
+                paragraphs.append(
+                    f"Наиболее негативная реакция концентрируется вокруг темы «{negative_theme['theme']}»."
+                )
+            elif positive_theme:
+                paragraphs.append(
+                    f"Наиболее позитивная реакция концентрируется вокруг темы «{positive_theme['theme']}»."
+                )
+
+        elif primary_mode == "theme_interest" and theme_map:
+            leader_theme = sorted(
+                theme_map,
+                key=lambda item: (
+                    int(item.get("likes_count", 0) or 0),
+                    int(item.get("comments_count", 0) or 0),
+                    int(item.get("reposts_count", 0) or 0),
+                ),
+                reverse=True,
+            )[0]
+            paragraphs.append(
+                f"Сильнее всего интерес аудитории концентрируется вокруг темы «{leader_theme['theme']}». "
+                f"По ней видно {leader_theme.get('comments_count', 0)} комментариев, {leader_theme.get('likes_count', 0)} {self._engagement_metric_label(leader_theme)} "
+                f"и {leader_theme.get('reposts_count', 0)} репостов."
+            )
+
+        else:
+            if focus_evidence:
+                lead_focus = focus_evidence[0]["post"]
+                paragraphs.append(
+                    f"Ближе всего к текущему запросу относится публикация «{lead_focus['post_text']}». "
+                    f"По ней видно {self._format_post_metrics(lead_focus, priority='success')}."
+                )
+            elif declared_theme:
+                paragraphs.append(f"Фокус анализа задан темой «{declared_theme}».")
+            elif derived_post_themes:
+                paragraphs.append(f"В текущем срезе заметнее всего сюжеты о {self._join_list(derived_post_themes[:4])}.")
+
+        if primary_mode != "source_comparison" and theme_map:
+            strongest_theme = sorted(
+                theme_map,
+                key=lambda item: (
+                    int(item.get("likes_count", 0) or 0),
+                    int(item.get("comments_count", 0) or 0),
+                    int(item.get("reposts_count", 0) or 0),
+                ),
+                reverse=True,
+            )[0]
+            paragraphs.append(
+                f"Среди тематических сюжетов сильнее всего выделяется «{strongest_theme['theme']}»."
+            )
+
+        if primary_mode in {"post_popularity", "post_underperformance", "mixed", "topic_report"}:
+            style_gap_explanation = self._build_style_gap_explanation(style_gap)
+            if style_gap_explanation:
+                paragraphs.append(style_gap_explanation)
+
+        if primary_mode != "source_comparison":
+            if analyzed_comments > 0:
+                paragraphs.append(
+                    f"По релевантным комментариям видно следующее распределение тональности: позитив {sentiment.get('positive_percent', 0)}%, негатив {sentiment.get('negative_percent', 0)}%, нейтрально {sentiment.get('neutral_percent', 0)}%."
+                )
+            elif total_posts > 0:
+                paragraphs.append(
+                    "Релевантных комментариев мало, поэтому вывод опирается прежде всего на метрики самих постов."
+                )
+
+        if confidence.get("level") == "low":
+            paragraphs.append(
+                f"Вывод стоит считать предварительным: в анализ попали {total_posts} постов и {analyzed_comments} релевантных комментариев."
+            )
+
+        if not paragraphs:
+            return f"По запросу «{prompt}» пока не хватает устойчивых сигналов для точного ответа."
+
+        return "\n\n".join(paragraphs).strip()
+
     def _join_list(self, items: list[str]) -> str:
         cleaned = [item for item in items if item]
         if not cleaned:
@@ -1880,6 +2388,61 @@ class SummaryGenerator:
         if len(cleaned) == 2:
             return f"{cleaned[0]} и {cleaned[1]}"
         return ", ".join(cleaned[:-1]) + f" и {cleaned[-1]}"
+
+    def _build_structured_summary_system_prompt(self) -> str:
+        return (
+            "You are a senior social media analyst for Telegram channels and VK communities.\n"
+            "Return only valid JSON with this schema:\n"
+            "{\n"
+            '  \"overview\": \"string\",\n'
+            '  \"takeaways\": [\"string\"],\n'
+            '  \"analysis_mode\": \"source_comparison|post_popularity|post_underperformance|theme_sentiment|theme_interest|topic_report|excel_export|mixed\"\n'
+            "}\n"
+            "Write overview and takeaways in Russian.\n"
+            "Rules:\n"
+            "- Follow analysis_request.primary_mode first. Use secondary_modes only as supporting context.\n"
+            "- The first sentence of overview must answer the user request directly.\n"
+            "- If primary_mode is source_comparison, compare channels or sources only and never replace the answer with one post.\n"
+            "- If primary_mode is post_popularity, rank primarily by views and likes_or_reactions. Comments and reposts are supporting signals.\n"
+            "- If primary_mode is post_underperformance, explain which posts lag behind and why.\n"
+            "- If primary_mode is theme_sentiment or theme_interest, rely on prompt_related_theme_map, theme_reaction_map, focus_evidence, and prompt-relevant posts.\n"
+            "- If analysis_request.theme_of_posts is set, stay strictly inside that theme scope.\n"
+            "- For Telegram, likes_count means reactions. For VK, likes_count means likes.\n"
+            "- Never invent facts. Never use fake topics or broken headline fragments.\n"
+            "- Topic labels must sound like short editorial themes.\n"
+            "- If confidence_assessment.level is low, say the conclusion is preliminary and avoid strong claims.\n"
+            "- Takeaways must contain 1 to 3 short, practical, non-redundant findings that directly answer the current request.\n"
+            "- Keep overview useful for business readers. Avoid filler and do not repeat the prompt verbatim."
+        )
+
+    def _build_theme_label_system_prompt(self) -> str:
+        return (
+            "You create short Russian editorial topic labels for a media analytics report. "
+            "Return only a JSON array with 3 to 6 Russian strings. "
+            "Every label must be a clean topic title, not a broken fragment of a headline. "
+            "Use 2 to 5 words, prefer noun phrases, merge duplicate stories, and keep the label readable. "
+            "Avoid channel names, dates, filler words, commands, questions, and generic words like post, news, or discussion. "
+            "If the prompt already contains a theme focus, prioritize labels that stay inside that focus."
+        )
+
+    def _prepare_post_text_for_theme_llm(self, text: str) -> str:
+        prepared = re.sub(r"https?://\S+|t\.me/\S+|vk\.com/\S+", " ", text)
+        prepared = re.sub(r"[@#]\S+", " ", prepared)
+        prepared = re.sub(r"[^\w\s.,!?:;()\-\u2013\u2014]", " ", prepared)
+        prepared = re.sub(r"\s+", " ", prepared).strip()
+        prepared = self._strip_theme_noise_suffix(prepared)
+        prepared = self._extract_title_phrase(prepared) or prepared
+        return self._shorten(prepared, limit=180)
+
+    def _extract_title_phrase(self, text: str) -> str:
+        sentence = self._split_into_sentences(text)[0].strip()
+        sentence = re.sub(r"\s+[—–-]\s+.*$", "", sentence)
+        sentence = re.sub(r"\s{2,}", " ", sentence).strip(" .,!?:;-")
+        if "," in sentence:
+            parts = [part.strip() for part in sentence.split(",") if part.strip()]
+            if parts:
+                sentence = max(parts, key=len)
+        return sentence
 
     def _normalize_text(self, value: str) -> str:
         return " ".join(value.lower().replace("ё", "е").split())

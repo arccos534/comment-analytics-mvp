@@ -37,12 +37,116 @@ export interface ProjectReportsTreeItem {
   reports: SavedReportItem[];
 }
 
+export type AnalysisMode =
+  | "source_comparison"
+  | "post_popularity"
+  | "post_underperformance"
+  | "theme_sentiment"
+  | "theme_interest"
+  | "topic_report"
+  | "excel_export"
+  | "mixed";
+
+export interface ReportComment {
+  comment_id: string | null;
+  text: string;
+  sentiment: string | null;
+  relevance_score: number | null;
+  post_url: string | null;
+}
+
+export interface ReportPost {
+  post_id: string | null;
+  post_url: string | null;
+  post_text: string | null;
+  platform?: string | null;
+  source_title?: string | null;
+  source_url?: string | null;
+  score?: number | null;
+  views_count?: number | null;
+  comments_count: number;
+  relevant_comments_count?: number | null;
+  positive_relevant_comments_count?: number | null;
+  negative_relevant_comments_count?: number | null;
+  neutral_relevant_comments_count?: number | null;
+  likes_count?: number | null;
+  reposts_count?: number | null;
+  reaction_tendency?: string | null;
+}
+
+export interface ThemeReactionItem {
+  theme: string;
+  platform?: string | null;
+  posts_count: number;
+  views_count?: number;
+  comments_count: number;
+  likes_count: number;
+  reposts_count: number;
+  interest_level: string;
+  reaction_tendency: string;
+  positive_comments: number;
+  negative_comments: number;
+  neutral_comments: number;
+  leading_post: ReportPost;
+}
+
+export interface FocusEvidenceItem {
+  matched_terms: string[];
+  post: ReportPost;
+}
+
+export interface SourceComparisonItem {
+  source_id: string;
+  source_title: string | null;
+  source_url: string | null;
+  platform: string | null;
+  subscriber_count?: number | null;
+  posts_count: number;
+  views_count: number;
+  comments_count: number;
+  relevant_comments_count: number;
+  positive_relevant_comments_count?: number | null;
+  negative_relevant_comments_count?: number | null;
+  neutral_relevant_comments_count?: number | null;
+  likes_count: number;
+  reposts_count: number;
+  avg_views_per_post: number;
+  avg_comments_per_post: number;
+  avg_likes_per_post: number;
+  avg_reposts_per_post: number;
+  score?: number | null;
+}
+
+export interface ReportSummary {
+  overview?: string;
+  takeaways?: string[];
+  analysis_mode?: AnalysisMode;
+  primary_mode?: AnalysisMode;
+  secondary_modes?: string[];
+  analysis_axes?: string[];
+  request_contract?: string[];
+  answer_strategy?: {
+    opening_style?: string;
+    must_cover?: string[];
+    answer_shape?: string;
+  };
+  confidence_assessment?: {
+    level: "high" | "medium" | "low";
+    reason: string;
+  };
+  theme_reaction_map?: ThemeReactionItem[];
+  focus_evidence?: FocusEvidenceItem[];
+}
+
 export interface ReportSnapshot {
   id: string;
   analysis_run_id: string;
   report_json: {
     meta: {
       project_id: string;
+      prompt_text?: string | null;
+      post_theme?: string | null;
+      post_keywords?: string[];
       period_from: string | null;
       period_to: string | null;
       platforms: string[];
@@ -76,62 +180,18 @@ export interface ReportSnapshot {
       matched: ReportPost[];
       top_popular: ReportPost[];
       top_unpopular: ReportPost[];
+      top_reacted?: ReportPost[];
+      top_unreacted?: ReportPost[];
+      top_discussed?: ReportPost[];
+      top_undiscussed?: ReportPost[];
+      success_top_bucket?: ReportPost[];
+      success_bottom_bucket?: ReportPost[];
     };
-    summary: {
-      overview?: string;
-      takeaways?: string[];
-      confidence_assessment?: {
-        level: "high" | "medium" | "low";
-        reason: string;
-      };
-      theme_reaction_map?: ThemeReactionItem[];
-      focus_evidence?: FocusEvidenceItem[];
+    sources?: {
+      comparison?: SourceComparisonItem[];
     };
+    summary: ReportSummary;
   };
   summary_text: string | null;
   created_at: string;
-}
-
-export interface ReportComment {
-  comment_id: string | null;
-  text: string;
-  sentiment: string | null;
-  relevance_score: number | null;
-  post_url: string | null;
-}
-
-export interface ReportPost {
-  post_id: string | null;
-  post_url: string;
-  post_text: string | null;
-  platform?: string | null;
-  score: number;
-  comments_count: number;
-  relevant_comments_count?: number | null;
-  positive_relevant_comments_count?: number | null;
-  negative_relevant_comments_count?: number | null;
-  neutral_relevant_comments_count?: number | null;
-  likes_count?: number | null;
-  reposts_count?: number | null;
-  reaction_tendency?: string | null;
-}
-
-export interface ThemeReactionItem {
-  theme: string;
-  platform?: string | null;
-  posts_count: number;
-  comments_count: number;
-  likes_count: number;
-  reposts_count: number;
-  interest_level: string;
-  reaction_tendency: string;
-  positive_comments: number;
-  negative_comments: number;
-  neutral_comments: number;
-  leading_post: ReportPost;
-}
-
-export interface FocusEvidenceItem {
-  matched_terms: string[];
-  post: ReportPost;
 }

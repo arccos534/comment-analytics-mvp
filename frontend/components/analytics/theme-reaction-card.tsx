@@ -64,13 +64,13 @@ export function ThemeReactionCard({
         {items.length ? (
           <div className="space-y-3">
             {items.map((item) => (
-              <div key={item.theme} className="rounded-2xl border border-border/60 bg-background/50 p-4">
+              <div key={`${item.theme}-${item.leading_post.post_id || item.leading_post.post_url || "theme"}`} className="rounded-2xl border border-border/60 bg-background/50 p-4">
                 <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                   <div>
                     <div className="text-base font-semibold">{item.theme}</div>
                     <div className="mt-1 text-sm text-muted-foreground">
-                      {item.posts_count} постов · {item.comments_count} комментариев · {item.likes_count}{" "}
-                      {getEngagementLabel(item)} · {item.reposts_count} репостов
+                      {item.posts_count} постов • {item.views_count || 0} просмотров • {item.comments_count} комментариев •{" "}
+                      {item.likes_count} {getEngagementLabel(item)} • {item.reposts_count} репостов
                     </div>
                   </div>
                   <div className="flex flex-wrap gap-2 text-xs">

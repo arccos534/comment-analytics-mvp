@@ -185,10 +185,11 @@ class VkProvider(BaseProvider):
     def _normalize_post(self, item: dict[str, Any]) -> NormalizedPost:
         owner_id = item["owner_id"]
         post_id = item["id"]
+        post_text = self._extract_post_text(item)
         return NormalizedPost(
             external_post_id=f"{owner_id}_{post_id}",
             post_url=f"https://vk.com/wall{owner_id}_{post_id}",
-            post_text=item.get("text") or None,
+            post_text=post_text,
             post_date=datetime.fromtimestamp(item["date"], tz=UTC),
             likes_count=item.get("likes", {}).get("count", 0),
             reposts_count=item.get("reposts", {}).get("count", item.get("shares", {}).get("count", 0)),
@@ -284,10 +285,36 @@ class VkProvider(BaseProvider):
         return group.get("name")
 
     def _build_post_title(self, post: dict[str, Any]) -> str:
-        text = (post.get("text") or "").strip()
+        text = (self._extract_post_text(post) or "").strip()
         if text:
             return text[:120]
         return f"VK post wall{post['owner_id']}_{post['id']}"
+
+    def _extract_post_text(self, item: dict[str, Any]) -> str | None:
+        candidates: list[str] = []
+
+        direct_text = (item.get("text") or "").strip()
+        if direct_text:
+            candidates.append(direct_text)
+
+        for repost in item.get("copy_history", []) or []:
+            repost_text = (repost.get("text") or "").strip()
+            if repost_text:
+                candidates.append(repost_text)
+
+        for attachment in item.get("attachments", []) or []:
+            attachment_type = attachment.get("type")
+            payload = attachment.get(attachment_type or "", {}) if attachment_type else {}
+            for field in ("title", "description", "text", "caption"):
+                value = (payload.get(field) or "").strip()
+                if value:
+                    candidates.append(value)
+
+        for candidate in candidates:
+            normalized = " ".join(candidate.split()).strip()
+            if normalized:
+                return normalized
+        return None
 
     def _fetch_all_wall_posts(
         self,

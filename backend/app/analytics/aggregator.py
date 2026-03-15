@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter, defaultdict
+from math import ceil
 
 
 class ReportAggregator:
@@ -111,12 +112,38 @@ class ReportAggregator:
             "neutral_comments": self._pick_examples(working_set, "neutral"),
         }
 
-        def popularity_score(value: dict) -> float:
-            comments_base = int(value.get("platform_comments_count", value.get("comments_count", 0)) or 0)
-            likes_score = int(value.get("likes_count", 0) or 0) * 2
-            reposts_score = int(value.get("reposts_count", 0) or 0) * 4
-            comments_score = comments_base * 5
-            return round(comments_score + likes_score + reposts_score, 2)
+        def success_score(value: dict) -> float:
+            views = int(value.get("views_count", 0) or 0)
+            likes = int(value.get("likes_count", 0) or 0)
+            comments = int(value.get("platform_comments_count", value.get("comments_count", 0)) or 0)
+            reposts = int(value.get("reposts_count", 0) or 0)
+            if views > 0:
+                return round(views + likes * 40 + comments * 12 + reposts * 20, 2)
+            return round(likes * 50 + comments * 15 + reposts * 20, 2)
+
+        def popularity_key(value: dict) -> tuple[int, int, int, int]:
+            return (
+                int(value.get("views_count", 0) or 0),
+                int(value.get("likes_count", 0) or 0),
+                int(value.get("platform_comments_count", value.get("comments_count", 0)) or 0),
+                int(value.get("reposts_count", 0) or 0),
+            )
+
+        def reaction_key(value: dict) -> tuple[int, int, int, int]:
+            return (
+                int(value.get("likes_count", 0) or 0),
+                int(value.get("views_count", 0) or 0),
+                int(value.get("platform_comments_count", value.get("comments_count", 0)) or 0),
+                int(value.get("reposts_count", 0) or 0),
+            )
+
+        def discussion_key(value: dict) -> tuple[int, int, int, int]:
+            return (
+                int(value.get("platform_comments_count", value.get("comments_count", 0)) or 0),
+                int(value.get("likes_count", 0) or 0),
+                int(value.get("views_count", 0) or 0),
+                int(value.get("reposts_count", 0) or 0),
+            )
 
         post_items = [
             {
@@ -128,7 +155,8 @@ class ReportAggregator:
                 "source_title": value["source_title"],
                 "source_url": value["source_url"],
                 "source_subscriber_count": value["source_subscriber_count"],
-                "score": popularity_score(value),
+                "score": success_score(value),
+                "views_count": value["views_count"],
                 "comments_count": value["platform_comments_count"],
                 "relevant_comments_count": value["relevant_comments_count"],
                 "positive_relevant_comments_count": value["positive_relevant_comments_count"],
@@ -148,6 +176,7 @@ class ReportAggregator:
                 "platform": None,
                 "subscriber_count": None,
                 "posts_count": 0,
+                "views_count": 0,
                 "comments_count": 0,
                 "relevant_comments_count": 0,
                 "positive_relevant_comments_count": 0,
@@ -180,6 +209,7 @@ class ReportAggregator:
             bucket["platform"] = item.get("platform")
             bucket["subscriber_count"] = item.get("source_subscriber_count")
             bucket["posts_count"] += 1
+            bucket["views_count"] += int(item.get("views_count", 0) or 0)
             bucket["comments_count"] += int(item.get("comments_count", 0) or 0)
             bucket["relevant_comments_count"] += int(item.get("relevant_comments_count", 0) or 0)
             bucket["positive_relevant_comments_count"] += int(item.get("positive_relevant_comments_count", 0) or 0)
@@ -190,7 +220,8 @@ class ReportAggregator:
 
         source_items = []
         for value in source_scores.values():
-            score = popularity_score(value)
+            posts_count = max(int(value["posts_count"] or 0), 1)
+            score = success_score(value)
             source_items.append(
                 {
                     "source_id": value["source_id"],
@@ -199,6 +230,7 @@ class ReportAggregator:
                     "platform": value["platform"],
                     "subscriber_count": value["subscriber_count"],
                     "posts_count": value["posts_count"],
+                    "views_count": value["views_count"],
                     "comments_count": value["comments_count"],
                     "relevant_comments_count": value["relevant_comments_count"],
                     "positive_relevant_comments_count": value["positive_relevant_comments_count"],
@@ -206,34 +238,45 @@ class ReportAggregator:
                     "neutral_relevant_comments_count": value["neutral_relevant_comments_count"],
                     "likes_count": value["likes_count"],
                     "reposts_count": value["reposts_count"],
+                    "avg_views_per_post": round(value["views_count"] / posts_count, 2),
+                    "avg_comments_per_post": round(value["comments_count"] / posts_count, 2),
+                    "avg_likes_per_post": round(value["likes_count"] / posts_count, 2),
+                    "avg_reposts_per_post": round(value["reposts_count"] / posts_count, 2),
                     "score": score,
                 }
             )
         source_items = sorted(
             source_items,
             key=lambda item: (
-                item["score"],
-                item["comments_count"],
-                item["likes_count"],
-                item["reposts_count"],
+                item["avg_views_per_post"],
+                item["avg_likes_per_post"],
+                item["avg_comments_per_post"],
+                item["avg_reposts_per_post"],
+                item["subscriber_count"] or 0,
             ),
             reverse=True,
         )
 
         matched_posts = sorted(
             post_items,
-            key=lambda item: (item["relevant_comments_count"], item["comments_count"], item["score"]),
+            key=lambda item: (
+                item["relevant_comments_count"],
+                item["comments_count"],
+                item["views_count"],
+                item["likes_count"],
+            ),
             reverse=True,
         )
-        popular_posts = sorted(
-            post_items,
-            key=lambda item: (item["score"], item["comments_count"], item["likes_count"], item["reposts_count"]),
-            reverse=True,
-        )[:5]
-        unpopular_posts = sorted(
-            post_items,
-            key=lambda item: (item["score"], item["comments_count"], item["likes_count"], item["reposts_count"]),
-        )[:5]
+        popular_posts = sorted(post_items, key=popularity_key, reverse=True)[:5]
+        unpopular_posts = sorted(post_items, key=popularity_key)[:5]
+        reacted_posts = sorted(post_items, key=reaction_key, reverse=True)[:5]
+        unreacted_posts = sorted(post_items, key=reaction_key)[:5]
+        discussed_posts = sorted(post_items, key=discussion_key, reverse=True)[:5]
+        bottom_discussed_posts = sorted(post_items, key=discussion_key)[:5]
+
+        top_bucket_count = max(1, ceil(len(post_items) * 0.2)) if post_items else 0
+        success_leaders = sorted(post_items, key=popularity_key, reverse=True)[:top_bucket_count]
+        success_trailers = sorted(post_items, key=popularity_key)[:top_bucket_count]
 
         report = {
             "meta": {
@@ -266,6 +309,12 @@ class ReportAggregator:
                 "matched": matched_posts,
                 "top_popular": popular_posts,
                 "top_unpopular": unpopular_posts,
+                "top_reacted": reacted_posts,
+                "top_unreacted": unreacted_posts,
+                "top_discussed": discussed_posts,
+                "top_undiscussed": bottom_discussed_posts,
+                "success_top_bucket": success_leaders,
+                "success_bottom_bucket": success_trailers,
             },
             "sources": {
                 "comparison": source_items,
