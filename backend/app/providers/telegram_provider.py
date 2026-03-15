@@ -282,7 +282,18 @@ class TelegramProvider(BaseProvider):
         results = getattr(reactions, "results", None) or []
         total = 0
         for item in results:
-            total += int(getattr(item, "count", 0) or 0)
+            if isinstance(item, dict):
+                total += int(item.get("count", 0) or 0)
+            else:
+                total += int(getattr(item, "count", 0) or 0)
+
+        if total > 0:
+            return total
+
+        recent_reactions = getattr(reactions, "recent_reactions", None) or []
+        if recent_reactions:
+            return len(recent_reactions)
+
         return total
 
     def _extract_parent_comment_id(self, message: Any) -> str | None:

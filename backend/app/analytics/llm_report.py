@@ -221,6 +221,7 @@ PROMPT_STOPWORDS = POST_THEME_STOPWORDS | {
     "самая",
     "самый",
     "самые",
+    "неделю",
 }
 
 CANONICAL_THEME_PATTERNS: list[tuple[str, str]] = [
@@ -471,6 +472,7 @@ class SummaryGenerator:
             result.append(
                 {
                     "theme": theme,
+                    "platform": leader.get("platform"),
                     "posts_count": len(matching),
                     "comments_count": comments_total,
                     "likes_count": likes_total,
@@ -957,7 +959,50 @@ class SummaryGenerator:
         }
 
     def _engagement_metric_label(self, post: dict) -> str:
-        return "реакций" if (post.get("platform") or "") == "telegram" else "лайков"
+        platform = (post.get("platform") or "") or ((post.get("leading_post") or {}).get("platform") or "")
+        return "реакций" if platform == "telegram" else "лайков"
+
+    def _filter_prompt_related_themes(
+        self,
+        themes: list[dict],
+        focus_evidence: list[dict],
+        prompt_focus_terms: list[str],
+    ) -> list[dict]:
+        if not themes:
+            return []
+
+        focus_post_ids = {
+            str(item.get("post", {}).get("post_id") or "")
+            for item in focus_evidence
+            if item.get("post", {}).get("post_id")
+        }
+        normalized_terms = [self._normalize_text(term) for term in prompt_focus_terms if term]
+        filtered: list[dict] = []
+
+        for item in themes:
+            leading_post = item.get("leading_post") or {}
+            if str(leading_post.get("post_id") or "") in focus_post_ids:
+                filtered.append(item)
+                continue
+
+            theme_text = self._normalize_text(item.get("theme") or "")
+            if not theme_text:
+                continue
+
+            matched = False
+            for term in normalized_terms:
+                tokens = [token for token in re.findall(r"[a-zа-я0-9-]{4,}", term) if token not in PROMPT_STOPWORDS]
+                if not tokens:
+                    continue
+                hits = sum(1 for token in tokens if token in theme_text)
+                if hits >= min(2, len(tokens)) or (len(tokens) == 1 and hits >= 1):
+                    matched = True
+                    break
+
+            if matched:
+                filtered.append(item)
+
+        return filtered
 
     def _build_takeaways(self, report_json: dict, payload: dict, prompt_text: str | None) -> list[str]:
         stats = report_json.get("stats", {})
@@ -967,6 +1012,10 @@ class SummaryGenerator:
         themes = payload.get("theme_reaction_map", []) or []
         focus_evidence = payload.get("focus_evidence", []) or []
         top_discussed_posts = payload.get("top_discussed_posts", []) or []
+        request = payload.get("analysis_request", {}) or {}
+        prompt_modes = set(request.get("prompt_mode", []) or [])
+        prompt_focus_terms = request.get("prompt_focus_terms", []) or []
+        related_themes = self._filter_prompt_related_themes(themes, focus_evidence, prompt_focus_terms)
 
         takeaways: list[str] = []
 
@@ -985,9 +1034,15 @@ class SummaryGenerator:
                     f"Ближе всего к запросу относится сюжет «{post_text}» — он напрямую связан с темами: {matched_terms}."
                 )
 
-        if themes:
+        if "most_discussed_news" in prompt_modes and top_discussed_posts:
+            lead_post = top_discussed_posts[0]
+            metric_label = self._engagement_metric_label(lead_post)
+            takeaways.append(
+                f"Наиболее обсуждаемой выглядит публикация «{lead_post['post_text']}»: {lead_post['comments_count']} комментариев, {lead_post['likes_count']} {metric_label} и {lead_post['reposts_count']} репостов."
+            )
+        elif related_themes:
             most_interesting = sorted(
-                themes,
+                related_themes,
                 key=lambda item: (
                     item.get("comments_count", 0),
                     item.get("likes_count", 0),
@@ -1001,11 +1056,11 @@ class SummaryGenerator:
             )
 
             strongest_negative = next(
-                (item for item in themes if item.get("reaction_tendency") == "скорее негативная"),
+                (item for item in related_themes if item.get("reaction_tendency") == "скорее негативная"),
                 None,
             )
             strongest_positive = next(
-                (item for item in themes if item.get("reaction_tendency") == "скорее позитивная"),
+                (item for item in related_themes if item.get("reaction_tendency") == "скорее позитивная"),
                 None,
             )
 
@@ -1049,7 +1104,7 @@ class SummaryGenerator:
         focus_evidence = payload.get("focus_evidence", [])
         theme_reaction_map = payload.get("theme_reaction_map", [])
 
-        if analyzed_comments <= 0:
+        if analyzed_comments <= 0 and total_posts <= 0:
             return (
                 f"По запросу «{prompt}» релевантные комментарии не найдены. "
                 "По текущей выборке нельзя сделать содержательный вывод о реакции аудитории."
@@ -1114,10 +1169,15 @@ class SummaryGenerator:
                     f"Негативные эмоции заметнее всего связаны с темами {self._join_list(negative_themes[:3])}. "
                 )
 
-        parts.append(
-            f"Распределение тональности по релевантным комментариям: позитив {sentiment.get('positive_percent', 0)}%, "
-            f"негатив {sentiment.get('negative_percent', 0)}%, нейтрально {sentiment.get('neutral_percent', 0)}%. "
-        )
+        if analyzed_comments > 0:
+            parts.append(
+                f"Распределение тональности по релевантным комментариям: позитив {sentiment.get('positive_percent', 0)}%, "
+                f"негатив {sentiment.get('negative_percent', 0)}%, нейтрально {sentiment.get('neutral_percent', 0)}%. "
+            )
+        else:
+            parts.append(
+                "Релевантных комментариев по текущему запросу мало или они отсутствуют, поэтому вывод опирается прежде всего на метрики самих постов. "
+            )
 
         if analyzed_comments < 10 or total_posts < 2:
             parts.append(
