@@ -16,6 +16,9 @@ class SourceRepository:
     def get(self, source_id: UUID) -> Source | None:
         return self.db.get(Source, source_id)
 
+    def exists(self, source_id: UUID) -> bool:
+        return self.db.scalar(select(Source.id).where(Source.id == source_id)) is not None
+
     def get_by_project_and_url(self, project_id: UUID, source_url: str) -> Source | None:
         return self.db.scalar(
             select(Source).where(Source.project_id == project_id, Source.source_url == source_url)

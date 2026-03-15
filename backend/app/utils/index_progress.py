@@ -31,6 +31,11 @@ def _progress_key(project_id: str) -> str:
     return f"comment-analytics:index-progress:{digest}"
 
 
+def _cancel_key(source_id: str) -> str:
+    digest = sha256(source_id.encode("utf-8")).hexdigest()
+    return f"comment-analytics:index-cancel:{digest}"
+
+
 def _serialize(value: dict) -> bytes:
     return orjson.dumps(value)
 
@@ -135,6 +140,27 @@ def clear_project_progress(project_id: str) -> None:
     if client is None:
         return
     client.delete(_progress_key(project_id))
+
+
+def cancel_source_index(source_id: str) -> None:
+    client = _get_client()
+    if client is None:
+        return
+    client.setex(_cancel_key(source_id), _ttl_seconds(), b"1")
+
+
+def is_source_index_cancelled(source_id: str) -> bool:
+    client = _get_client()
+    if client is None:
+        return False
+    return bool(client.exists(_cancel_key(source_id)))
+
+
+def clear_source_cancellation(source_id: str) -> None:
+    client = _get_client()
+    if client is None:
+        return
+    client.delete(_cancel_key(source_id))
 
 
 def build_progress_summary(project_id: str) -> dict | None:

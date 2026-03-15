@@ -15,9 +15,11 @@ from app.schemas.source import IndexModeEnum, IndexPeriodPresetEnum, IndexReques
 from app.utils.dates import utcnow
 from app.utils.index_progress import (
     build_progress_summary,
+    clear_source_cancellation,
     clear_current_source,
     finish_source_progress,
     init_project_progress,
+    is_source_index_cancelled,
     set_source_processed_posts,
     set_source_total_posts,
     start_source_progress,
@@ -135,6 +137,11 @@ class IngestionService:
     ) -> dict:
         source = self.sources.get(source_id)
         if not source:
+            clear_source_cancellation(str(source_id))
+            return {"posts": 0, "comments": 0}
+
+        if is_source_index_cancelled(str(source_id)):
+            clear_source_cancellation(str(source_id))
             return {"posts": 0, "comments": 0}
 
         source.status = SourceStatusEnum.indexing
@@ -156,6 +163,11 @@ class IngestionService:
 
             total_comments = 0
             for index, (normalized_post, persisted_post) in enumerate(zip(posts, persisted_posts, strict=False), start=1):
+                if is_source_index_cancelled(str(source_id)) or not self.sources.exists(source_id):
+                    self.db.rollback()
+                    clear_source_cancellation(str(source_id))
+                    clear_current_source(str(source.project_id))
+                    return {"posts": 0, "comments": 0}
                 try:
                     if normalized_post.comments_count <= 0:
                         continue
@@ -177,10 +189,21 @@ class IngestionService:
                 finally:
                     set_source_processed_posts(str(source.project_id), index)
 
+            if is_source_index_cancelled(str(source_id)) or not self.sources.exists(source_id):
+                self.db.rollback()
+                clear_source_cancellation(str(source_id))
+                clear_current_source(str(source.project_id))
+                return {"posts": 0, "comments": 0}
+
             self.db.commit()
+            if not self.sources.exists(source_id):
+                clear_source_cancellation(str(source_id))
+                clear_current_source(str(source.project_id))
+                return {"posts": 0, "comments": 0}
             source.status = SourceStatusEnum.ready
             source.last_indexed_at = utcnow()
             self.sources.update(source)
+            clear_source_cancellation(str(source_id))
             return {"posts": len(persisted_posts), "comments": total_comments}
         except Exception:
             logger.exception(
@@ -191,8 +214,10 @@ class IngestionService:
                 until.isoformat() if until else None,
                 posts_limit,
             )
-            source.status = SourceStatusEnum.failed
-            self.sources.update(source)
+            if self.sources.exists(source_id):
+                source.status = SourceStatusEnum.failed
+                self.sources.update(source)
+            clear_source_cancellation(str(source_id))
             return {"posts": 0, "comments": 0}
 
     def _resolve_index_window(self, request: IndexRequest) -> tuple[datetime | None, datetime | None, int | None]:

@@ -9,7 +9,7 @@ from app.providers.factory import get_provider
 from app.repositories.project_repository import ProjectRepository
 from app.repositories.source_repository import SourceRepository
 from app.schemas.source import SourceBulkCreateResponse, SourceValidationResult
-from app.utils.index_progress import clear_current_source, clear_project_progress
+from app.utils.index_progress import cancel_source_index, clear_current_source, clear_project_progress
 from app.utils.validators import detect_platform_and_type, split_urls
 
 
@@ -30,6 +30,7 @@ class SourceService:
         if not source:
             return False
         if source.status == SourceStatusEnum.indexing:
+            cancel_source_index(str(source.id))
             clear_current_source(str(source.project_id))
             remaining_sources = [
                 item
