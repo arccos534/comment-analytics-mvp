@@ -9,6 +9,10 @@ from collections import Counter
 from openai import OpenAI
 from redis import Redis
 
+from app.analytics.prompt_intent import (
+    build_prompt_intent as build_shared_prompt_intent,
+    extract_prompt_focus_terms as extract_shared_prompt_focus_terms,
+)
 from app.core.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -604,7 +608,9 @@ class SummaryGenerator:
         top_unpopular = (posts.get("top_unpopular", []) or [])[:5]
         source_comparison = (report_json.get("sources", {}).get("comparison", []) or [])[:8]
         declared_theme = (report_json.get("meta", {}).get("post_theme") or "").strip() or None
-        analysis_axes = self._infer_analysis_axes(prompt_text)
+        has_explicit_scope = bool(declared_theme or report_json.get("meta", {}).get("post_keywords"))
+        prompt_intent = build_shared_prompt_intent(prompt_text, has_explicit_scope=has_explicit_scope)
+        analysis_axes = prompt_intent.analysis_axes
         theme_scoped_posts = self._filter_posts_for_declared_theme(
             matched_posts + top_popular + top_unpopular,
             declared_theme,
@@ -636,20 +642,20 @@ class SummaryGenerator:
             declared_theme=declared_theme,
             heuristic_themes=heuristic_post_themes,
         )
-        prompt_mode = self._infer_prompt_mode(prompt_text)
-        prompt_focus_terms = self._extract_prompt_focus_terms(prompt_text)
+        prompt_mode = prompt_intent.prompt_mode
+        prompt_focus_terms = prompt_intent.focus_terms
 
         return {
             "analysis_request": {
                 "theme_of_posts": (report_json.get("meta", {}).get("post_theme") or "").strip() or None,
                 "declared_theme_present": bool(declared_theme),
-                "has_explicit_scope": bool(declared_theme or report_json.get("meta", {}).get("post_keywords")),
+                "has_explicit_scope": has_explicit_scope,
                 "keywords_for_posts": report_json.get("meta", {}).get("post_keywords", []),
                 "user_prompt": (prompt_text or "").strip(),
                 "analysis_axes": analysis_axes,
                 "prompt_mode": prompt_mode,
-                "request_contract": self._infer_request_contract(prompt_text),
-                "answer_strategy": self._build_answer_strategy(prompt_text, analysis_axes),
+                "request_contract": prompt_intent.request_contract,
+                "answer_strategy": prompt_intent.answer_strategy,
                 "prompt_focus_terms": prompt_focus_terms,
                 "period_from": report_json.get("meta", {}).get("period_from"),
                 "period_to": report_json.get("meta", {}).get("period_to"),
@@ -933,6 +939,8 @@ class SummaryGenerator:
         return [payload for _, payload in scored[:5]]
 
     def _infer_analysis_axes(self, prompt_text: str | None) -> list[str]:
+        return build_shared_prompt_intent(prompt_text).analysis_axes
+
         prompt = self._normalize_text(prompt_text or "")
         if not prompt:
             return ["general"]
@@ -948,6 +956,8 @@ class SummaryGenerator:
         return axes or ["general"]
 
     def _infer_prompt_mode(self, prompt_text: str | None) -> list[str]:
+        return build_shared_prompt_intent(prompt_text).prompt_mode
+
         prompt = self._normalize_text(prompt_text or "")
         modes: list[str] = []
         patterns = [
@@ -976,6 +986,8 @@ class SummaryGenerator:
         return modes or ["general_analysis"]
 
     def _infer_request_contract(self, prompt_text: str | None) -> list[str]:
+        return build_shared_prompt_intent(prompt_text).request_contract
+
         modes = self._infer_prompt_mode(prompt_text)
         instructions: list[str] = []
 
@@ -1039,6 +1051,8 @@ class SummaryGenerator:
         return instructions
 
     def _build_answer_strategy(self, prompt_text: str | None, analysis_axes: list[str] | None = None) -> dict:
+        return build_shared_prompt_intent(prompt_text).answer_strategy
+
         prompt = self._normalize_text(prompt_text or "")
         axes = set(analysis_axes or [])
         response_shape = "analysis_note"
@@ -1107,6 +1121,8 @@ class SummaryGenerator:
         }
 
     def _extract_prompt_focus_terms(self, prompt_text: str | None) -> list[str]:
+        return extract_shared_prompt_focus_terms(prompt_text)
+
         prompt = self._normalize_text(prompt_text or "")
         if not prompt:
             return []

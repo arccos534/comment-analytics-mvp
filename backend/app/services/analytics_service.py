@@ -8,6 +8,11 @@ from sqlalchemy.orm import Session
 
 from app.analytics.aggregator import ReportAggregator
 from app.analytics.keywords import KeywordExtractor
+from app.analytics.prompt_intent import (
+    GENERIC_PROMPT_SCOPE_TERMS as SHARED_GENERIC_PROMPT_SCOPE_TERMS,
+    build_prompt_intent as build_shared_prompt_intent,
+    extract_prompt_scope_terms as extract_shared_prompt_scope_terms,
+)
 from app.analytics.relevance import RelevanceScorer
 from app.analytics.sentiment import SentimentAnalyzer
 from app.analytics.topics import TopicGrouper
@@ -428,6 +433,8 @@ class AnalyticsService:
         return ordered[:8]
 
     def _extract_prompt_scope_terms(self, prompt_text: str | None) -> list[str]:
+        return extract_shared_prompt_scope_terms(prompt_text)
+
         prompt = self._normalize_term(prompt_text or "")
         if not prompt:
             return []
@@ -450,7 +457,7 @@ class AnalyticsService:
         if not prompt_terms:
             return True
 
-        focus_terms = [term for term in prompt_terms if term not in GENERIC_PROMPT_SCOPE_TERMS_V2]
+        focus_terms = [term for term in prompt_terms if term not in SHARED_GENERIC_PROMPT_SCOPE_TERMS]
         if not focus_terms:
             return True
 
@@ -539,6 +546,8 @@ class AnalyticsService:
         return topic_score >= 0.18
 
     def _is_source_metric_prompt(self, prompt_text: str | None) -> bool:
+        return build_shared_prompt_intent(prompt_text, has_explicit_scope=False).source_only
+
         prompt = self._normalize_term(prompt_text or "")
         if not prompt:
             return False
@@ -580,9 +589,9 @@ class AnalyticsService:
                 source_ids=source_filters,
                 platforms=platform_filters,
             )
-            source_only_prompt = self._is_source_metric_prompt(run.prompt_text) and not (
-                (run.theme or "").strip() or (run.keywords_json or [])
-            )
+            has_explicit_scope = bool((run.theme or "").strip() or (run.keywords_json or []))
+            prompt_intent = build_shared_prompt_intent(run.prompt_text, has_explicit_scope=has_explicit_scope)
+            source_only_prompt = prompt_intent.source_only
             if source_only_prompt:
                 scoped_posts = [
                     {"post": post, "source": source}
