@@ -79,6 +79,7 @@ function getThemeSuccessScore(item: ThemeReactionItem): number {
 function getThemeCardConfig(report: ReportSnapshot["report_json"], mode: AnalysisMode): ThemeCardConfig {
   const baseItems = [...(report.summary.theme_reaction_map || [])];
   const requestedCount = getRequestedCount(report.meta.prompt_text);
+  const promptModes = new Set(report.summary.prompt_modes || []);
 
   if (mode === "theme_popularity") {
     const items = [...baseItems].sort((left, right) => getThemeSuccessScore(right) - getThemeSuccessScore(left));
@@ -107,6 +108,42 @@ function getThemeCardConfig(report: ReportSnapshot["report_json"], mode: Analysi
       items: baseItems,
       emptyText: "Для текущей выборки карта тем и реакции пока не сформировалась.",
     };
+  }
+
+  if (mode === "theme_sentiment") {
+    if (promptModes.has("negative_analysis") && !promptModes.has("positive_analysis")) {
+      const items = [...baseItems]
+        .sort(
+          (left, right) =>
+            Number(right.negative_comments || 0) - Number(left.negative_comments || 0) ||
+            Number(right.comments_count || 0) - Number(left.comments_count || 0) ||
+            Number(right.posts_count || 0) - Number(left.posts_count || 0)
+        )
+        .filter((item) => Number(item.negative_comments || 0) > 0);
+      return {
+        title: requestedCount ? `Топ ${requestedCount} тем с наиболее негативной реакцией` : "Темы с наиболее негативной реакцией",
+        description: "Ранжирование идет по числу негативных релевантных комментариев. Реакция аудитории оценивается в первую очередь по тому, о чем пишут люди.",
+        items: requestedCount ? items.slice(0, requestedCount) : items,
+        emptyText: "Для текущей выборки пока не удалось выделить темы с заметной негативной реакцией в комментариях.",
+      };
+    }
+
+    if (promptModes.has("positive_analysis") && !promptModes.has("negative_analysis")) {
+      const items = [...baseItems]
+        .sort(
+          (left, right) =>
+            Number(right.positive_comments || 0) - Number(left.positive_comments || 0) ||
+            Number(right.comments_count || 0) - Number(left.comments_count || 0) ||
+            Number(right.posts_count || 0) - Number(left.posts_count || 0)
+        )
+        .filter((item) => Number(item.positive_comments || 0) > 0);
+      return {
+        title: requestedCount ? `Топ ${requestedCount} тем с наиболее позитивной реакцией` : "Темы с наиболее позитивной реакцией",
+        description: "Ранжирование идет по числу позитивных релевантных комментариев. Реакция аудитории оценивается в первую очередь по тому, о чем пишут люди.",
+        items: requestedCount ? items.slice(0, requestedCount) : items,
+        emptyText: "Для текущей выборки пока не удалось выделить темы с заметной позитивной реакцией в комментариях.",
+      };
+    }
   }
 
   return {

@@ -45,6 +45,24 @@ GENERIC_PROMPT_SCOPE_TERMS = {
     "найди",
     "отчет",
     "отчёт",
+    "который",
+    "которая",
+    "которые",
+    "которому",
+    "которых",
+    "которым",
+    "реагирует",
+    "реагируют",
+    "относятся",
+    "относится",
+    "воспринимают",
+    "воспринимает",
+    "негативно",
+    "позитивно",
+    "негативной",
+    "позитивной",
+    "негативную",
+    "позитивную",
 }
 
 PROMPT_STOPWORDS = GENERIC_PROMPT_SCOPE_TERMS | {
@@ -458,7 +476,7 @@ def build_prompt_intent(prompt_text: str | None, has_explicit_scope: bool = Fals
     meaningful_scope_terms = [
         term
         for term in scope_terms
-        if normalize_prompt_text(term) not in GENERIC_PROMPT_SCOPE_TERMS
+        if normalize_prompt_text(term) not in PROMPT_STOPWORDS
     ]
     emotion_only_scope = bool(meaningful_scope_terms) and all(
         re.search(r"(позитив|негатив|поддерж|одобр|жалоб|критик|интерес|реакц)", normalize_prompt_text(term))
@@ -479,7 +497,7 @@ def build_prompt_intent(prompt_text: str | None, has_explicit_scope: bool = Fals
         "post_sentiment",
         "theme_popularity",
         "theme_underperformance",
-    } or generic_reaction_question
+    } or (generic_reaction_question and not focus_terms)
 
     source_only = primary_mode == "source_comparison" and not has_explicit_scope and not meaningful_scope_terms
 

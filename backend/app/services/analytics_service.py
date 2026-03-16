@@ -376,11 +376,7 @@ class AnalyticsService:
         if prompt_intent.generic_scope:
             return True
 
-        prompt_terms = self._extract_prompt_scope_terms(prompt_text)
-        if not prompt_terms:
-            return True
-
-        focus_terms = [term for term in prompt_terms if term not in SHARED_GENERIC_PROMPT_SCOPE_TERMS]
+        focus_terms = prompt_intent.focus_terms
         if not focus_terms:
             return True
 

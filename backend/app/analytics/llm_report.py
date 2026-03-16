@@ -756,6 +756,10 @@ class SummaryGenerator:
             focus_evidence,
             prompt_focus_terms,
         )
+        prompt_related_theme_map = self._prioritize_theme_map_for_request(
+            prompt_related_theme_map or theme_reaction_map,
+            prompt_mode,
+        )
 
         return {
             "analysis_request": {
@@ -1651,6 +1655,22 @@ class SummaryGenerator:
             int(post.get("reposts_count", 0) or 0),
         )
 
+    def _theme_positive_key(self, theme: dict) -> tuple[int, int, int, int]:
+        return (
+            int(theme.get("positive_comments", 0) or 0),
+            int(theme.get("comments_count", 0) or 0),
+            int(theme.get("posts_count", 0) or 0),
+            int(theme.get("likes_count", 0) or 0),
+        )
+
+    def _theme_negative_key(self, theme: dict) -> tuple[int, int, int, int]:
+        return (
+            int(theme.get("negative_comments", 0) or 0),
+            int(theme.get("comments_count", 0) or 0),
+            int(theme.get("posts_count", 0) or 0),
+            int(theme.get("likes_count", 0) or 0),
+        )
+
     def _theme_success_key(self, theme: dict) -> tuple[int, int, int, int, int]:
         return (
             int(theme.get("views_count", 0) or 0),
@@ -1818,6 +1838,39 @@ class SummaryGenerator:
                 filtered.append(item)
 
         return filtered
+
+    def _prioritize_theme_map_for_request(self, themes: list[dict], prompt_modes: set[str] | list[str]) -> list[dict]:
+        if not themes:
+            return []
+
+        mode_set = set(prompt_modes or [])
+        items = list(themes)
+
+        if "negative_analysis" in mode_set and "positive_analysis" not in mode_set:
+            ranked = sorted(items, key=self._theme_negative_key, reverse=True)
+            filtered = [item for item in ranked if int(item.get("negative_comments", 0) or 0) > 0]
+            return filtered or ranked
+
+        if "positive_analysis" in mode_set and "negative_analysis" not in mode_set:
+            ranked = sorted(items, key=self._theme_positive_key, reverse=True)
+            filtered = [item for item in ranked if int(item.get("positive_comments", 0) or 0) > 0]
+            return filtered or ranked
+
+        if {"positive_analysis", "negative_analysis"} & mode_set:
+            return sorted(
+                items,
+                key=lambda item: (
+                    max(
+                        int(item.get("positive_comments", 0) or 0),
+                        int(item.get("negative_comments", 0) or 0),
+                    ),
+                    int(item.get("comments_count", 0) or 0),
+                    int(item.get("posts_count", 0) or 0),
+                ),
+                reverse=True,
+            )
+
+        return items
 
     def _build_takeaways(self, report_json: dict, payload: dict, prompt_text: str | None) -> list[str]:
         stats = report_json.get("stats", {})
@@ -2131,8 +2184,10 @@ class SummaryGenerator:
             focus_evidence,
             prompt_focus_terms,
         ) or payload.get("theme_reaction_map", []) or []
+        theme_map = self._prioritize_theme_map_for_request(theme_map, prompt_modes)
         style_gap = payload.get("style_gap", {}) or {}
         wants_success_buckets = bool({"successful_posts_bucket", "underperforming_posts_bucket"} & prompt_modes)
+        wants_theme_polarity = bool({"negative_analysis", "positive_analysis"} & prompt_modes)
 
         if request.get("theme_of_posts"):
             top_discussed_posts = payload.get("theme_scoped_posts", []) or top_discussed_posts
@@ -2178,7 +2233,9 @@ class SummaryGenerator:
                 )
             return list(dict.fromkeys(takeaways))[:3]
 
-        if focus_evidence and primary_mode in {"topic_report", "mixed", "theme_interest", "theme_sentiment"}:
+        if focus_evidence and primary_mode in {"topic_report", "mixed", "theme_interest", "theme_sentiment"} and not (
+            primary_mode == "theme_sentiment" and wants_theme_polarity
+        ):
             lead = focus_evidence[0]
             matched_terms = ", ".join(lead.get("matched_terms", [])[:3])
             post = lead.get("post", {})
@@ -2261,6 +2318,30 @@ class SummaryGenerator:
             takeaways.append(
                 f"Среди тем слабее всего выглядит «{weakest_theme['theme']}»: {weakest_theme['comments_count']} комментариев, {weakest_theme['likes_count']} {metric_label} и {weakest_theme['reposts_count']} репостов."
             )
+        elif primary_mode == "theme_sentiment" and theme_map:
+            if "negative_analysis" in prompt_modes and "positive_analysis" not in prompt_modes:
+                negative_themes = [item["theme"] for item in theme_map if int(item.get("negative_comments", 0) or 0) > 0]
+                if negative_themes:
+                    takeaways.append(
+                        f"Наиболее негативную реакцию по комментариям вызывают темы {self._join_list(negative_themes[:3])}."
+                    )
+            elif "positive_analysis" in prompt_modes and "negative_analysis" not in prompt_modes:
+                positive_themes = [item["theme"] for item in theme_map if int(item.get("positive_comments", 0) or 0) > 0]
+                if positive_themes:
+                    takeaways.append(
+                        f"Наиболее позитивную реакцию по комментариям вызывают темы {self._join_list(positive_themes[:3])}."
+                    )
+            else:
+                positive_theme = next((item for item in theme_map if item.get("reaction_tendency") == "скорее позитивная"), None)
+                negative_theme = next((item for item in theme_map if item.get("reaction_tendency") == "скорее негативная"), None)
+                if positive_theme and negative_theme:
+                    takeaways.append(
+                        f"По комментариям аудитории наиболее позитивно воспринимается тема «{positive_theme['theme']}», а наиболее негативно — «{negative_theme['theme']}»."
+                    )
+                elif negative_theme:
+                    takeaways.append(f"Наиболее негативную реакцию по комментариям собирает тема «{negative_theme['theme']}».")
+                elif positive_theme:
+                    takeaways.append(f"Наиболее позитивную реакцию по комментариям собирает тема «{positive_theme['theme']}».")
         elif theme_map:
             leader_theme = sorted(
                 theme_map,
@@ -2316,6 +2397,7 @@ class SummaryGenerator:
         analyzed_comments = int(stats.get("analyzed_comments", 0) or 0)
         derived_post_themes = payload.get("derived_post_themes", []) or []
         theme_map = payload.get("prompt_related_theme_map", []) or payload.get("theme_reaction_map", []) or []
+        theme_map = self._prioritize_theme_map_for_request(theme_map, prompt_modes)
         matched_posts = payload.get("matched_posts", []) or []
         focus_evidence = payload.get("focus_evidence", []) or []
         source_comparison = payload.get("source_comparison_map", []) or []
@@ -2449,19 +2531,29 @@ class SummaryGenerator:
                 )
 
         elif primary_mode == "theme_sentiment" and theme_map:
-            positive_theme = next((item for item in theme_map if item.get("reaction_tendency") == "скорее позитивная"), None)
-            negative_theme = next((item for item in theme_map if item.get("reaction_tendency") == "скорее негативная"), None)
-            if positive_theme and negative_theme:
+            positive_theme = next((item for item in theme_map if int(item.get("positive_comments", 0) or 0) > 0), None)
+            negative_theme = next((item for item in theme_map if int(item.get("negative_comments", 0) or 0) > 0), None)
+            if "negative_analysis" in prompt_modes and "positive_analysis" not in prompt_modes and negative_theme:
                 paragraphs.append(
-                    f"Наиболее позитивную реакцию вызывает тема «{positive_theme['theme']}», а наиболее негативную — тема «{negative_theme['theme']}»."
+                    f"Наиболее негативную реакцию по комментариям вызывает тема «{negative_theme['theme']}». "
+                    f"В ней зафиксировано {negative_theme.get('negative_comments', 0)} негативных релевантных комментариев против {negative_theme.get('positive_comments', 0)} позитивных."
+                )
+            elif "positive_analysis" in prompt_modes and "negative_analysis" not in prompt_modes and positive_theme:
+                paragraphs.append(
+                    f"Наиболее позитивную реакцию по комментариям вызывает тема «{positive_theme['theme']}». "
+                    f"В ней зафиксировано {positive_theme.get('positive_comments', 0)} позитивных релевантных комментариев против {positive_theme.get('negative_comments', 0)} негативных."
+                )
+            elif positive_theme and negative_theme:
+                paragraphs.append(
+                    f"Наиболее позитивную реакцию по комментариям вызывает тема «{positive_theme['theme']}», а наиболее негативную — тема «{negative_theme['theme']}»."
                 )
             elif negative_theme:
                 paragraphs.append(
-                    f"Наиболее негативная реакция концентрируется вокруг темы «{negative_theme['theme']}»."
+                    f"Наиболее негативная реакция по комментариям концентрируется вокруг темы «{negative_theme['theme']}»."
                 )
             elif positive_theme:
                 paragraphs.append(
-                    f"Наиболее позитивная реакция концентрируется вокруг темы «{positive_theme['theme']}»."
+                    f"Наиболее позитивная реакция по комментариям концентрируется вокруг темы «{positive_theme['theme']}»."
                 )
 
         elif primary_mode == "theme_popularity" and theme_map:
@@ -2504,7 +2596,7 @@ class SummaryGenerator:
             elif derived_post_themes:
                 paragraphs.append(f"В текущем срезе заметнее всего сюжеты о {self._join_list(derived_post_themes[:4])}.")
 
-        if primary_mode != "source_comparison" and theme_map:
+        if primary_mode not in {"source_comparison", "theme_sentiment"} and theme_map:
             strongest_theme = sorted(
                 theme_map,
                 key=lambda item: (
