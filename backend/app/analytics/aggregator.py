@@ -7,6 +7,45 @@ from app.analytics.prompt_intent import extract_requested_count, extract_request
 
 
 class ReportAggregator:
+    POSITIVE_HINT_TOKENS = {
+        "хорош",
+        "отлич",
+        "молод",
+        "правиль",
+        "верно",
+        "соглас",
+        "спасибо",
+        "нрав",
+        "любл",
+        "поддерж",
+        "класс",
+        "супер",
+        "рад",
+        "здоров",
+        "побед",
+    }
+
+    NEGATIVE_HINT_TOKENS = {
+        "плох",
+        "ужас",
+        "кошмар",
+        "мошенн",
+        "фальсифик",
+        "поддел",
+        "обман",
+        "вран",
+        "лж",
+        "шантаж",
+        "позор",
+        "стыд",
+        "дур",
+        "ебан",
+        "ненавиж",
+        "развод",
+        "схам",
+        "херн",
+    }
+
     def build_report(
         self,
         run,
@@ -184,9 +223,9 @@ class ReportAggregator:
                 "positive_relevant_comments_count": value["positive_relevant_comments_count"],
                 "negative_relevant_comments_count": value["negative_relevant_comments_count"],
                 "neutral_relevant_comments_count": value["neutral_relevant_comments_count"],
-                "positive_comment_examples": self._pick_candidate_examples(value["positive_comment_candidates"]),
-                "negative_comment_examples": self._pick_candidate_examples(value["negative_comment_candidates"]),
-                "neutral_comment_examples": self._pick_candidate_examples(value["neutral_comment_candidates"]),
+                "positive_comment_examples": self._pick_candidate_examples(value["positive_comment_candidates"], expected_sentiment="positive"),
+                "negative_comment_examples": self._pick_candidate_examples(value["negative_comment_candidates"], expected_sentiment="negative"),
+                "neutral_comment_examples": self._pick_candidate_examples(value["neutral_comment_candidates"], expected_sentiment="neutral"),
                 "likes_count": value["likes_count"],
                 "reposts_count": value["reposts_count"],
             }
@@ -379,8 +418,19 @@ class ReportAggregator:
                 break
         return examples
 
-    def _pick_candidate_examples(self, items: list[dict], limit: int = 3) -> list[dict]:
+    def _pick_candidate_examples(
+        self,
+        items: list[dict],
+        limit: int = 3,
+        expected_sentiment: str | None = None,
+    ) -> list[dict]:
         subset = sorted(items, key=lambda item: item.get("relevance_score", 0), reverse=True)
+        aligned_subset = [
+            item for item in subset
+            if self._matches_expected_comment_sentiment(item.get("text") or "", expected_sentiment)
+        ]
+        if aligned_subset:
+            subset = aligned_subset
         seen: set[str] = set()
         examples: list[dict] = []
         for item in subset:
@@ -400,3 +450,22 @@ class ReportAggregator:
             if len(examples) >= limit:
                 break
         return examples
+
+    def _matches_expected_comment_sentiment(self, text: str, expected_sentiment: str | None) -> bool:
+        if not expected_sentiment or expected_sentiment == "neutral":
+            return True
+
+        positive_hits, negative_hits = self._comment_sentiment_hints(text)
+        if positive_hits == 0 and negative_hits == 0:
+            return True
+        if expected_sentiment == "positive":
+            return positive_hits >= negative_hits
+        if expected_sentiment == "negative":
+            return negative_hits >= positive_hits
+        return True
+
+    def _comment_sentiment_hints(self, text: str) -> tuple[int, int]:
+        normalized = (text or "").strip().lower().replace("ё", "е")
+        positive_hits = sum(1 for token in self.POSITIVE_HINT_TOKENS if token in normalized)
+        negative_hits = sum(1 for token in self.NEGATIVE_HINT_TOKENS if token in normalized)
+        return positive_hits, negative_hits

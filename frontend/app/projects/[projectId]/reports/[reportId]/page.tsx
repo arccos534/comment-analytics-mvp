@@ -378,16 +378,19 @@ function getPostSections(report: ReportSnapshot["report_json"], mode: AnalysisMo
   }
 
   if (mode === "post_sentiment") {
+    const requestedNegative = promptModes.has("most_negative_post");
+    const requestedPositive = promptModes.has("most_positive_post");
+    const showBoth = !requestedNegative && !requestedPositive;
     return [
       {
         title: "Посты с самой негативной реакцией",
         description: "Лидеры по числу негативных релевантных комментариев и признакам недовольства аудитории.",
-        posts: topNegativePosts,
+        posts: requestedNegative || showBoth ? topNegativePosts : [],
       },
       {
         title: "Посты с самой позитивной реакцией",
         description: "Лидеры по числу позитивных релевантных комментариев и признакам поддержки аудитории.",
-        posts: topPositivePosts,
+        posts: requestedPositive || showBoth ? topPositivePosts : [],
       },
     ];
   }
@@ -419,15 +422,19 @@ function getCommentSections(report: ReportSnapshot["report_json"], mode: Analysi
   const sections: CommentSection[] = [];
 
   if (mode === "post_sentiment") {
+    const promptModes = new Set(report.summary.prompt_modes || []);
+    const requestedNegative = promptModes.has("most_negative_post");
+    const requestedPositive = promptModes.has("most_positive_post");
+    const showBoth = !requestedNegative && !requestedPositive;
     const negativeLead = report.summary.top_negative_posts?.[0];
     const positiveLead = report.summary.top_positive_posts?.[0];
-    if (negativeLead?.negative_comment_examples?.length) {
+    if ((requestedNegative || showBoth) && negativeLead?.negative_comment_examples?.length) {
       sections.push({
         title: "Комментарии к самому негативному посту",
         comments: negativeLead.negative_comment_examples,
       });
     }
-    if (positiveLead?.positive_comment_examples?.length) {
+    if ((requestedPositive || showBoth) && positiveLead?.positive_comment_examples?.length) {
       sections.push({
         title: "Комментарии к самому позитивному посту",
         comments: positiveLead.positive_comment_examples,

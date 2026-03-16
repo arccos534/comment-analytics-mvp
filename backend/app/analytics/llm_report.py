@@ -333,6 +333,38 @@ THEME_NOISE_TOKENS = {
     "городские",
 }
 
+POSITIVE_REASON_HINTS = {
+    "хорош": "одобрении и поддержке новости",
+    "отлич": "положительной оценке ситуации",
+    "молод": "поддержке действий или решения",
+    "правиль": "одобрении решения",
+    "верно": "согласии с позицией публикации",
+    "спасибо": "благодарности и одобрении",
+    "нрав": "симпатии и явном одобрении",
+    "поддерж": "поддержке и согласии",
+    "класс": "положительном впечатлении",
+    "супер": "положительном впечатлении",
+    "рад": "радости и одобрении",
+}
+
+NEGATIVE_REASON_HINTS = {
+    "мошенн": "недоверии и обвинениях в обмане",
+    "обман": "ощущении обмана",
+    "фальсифик": "сомнениях в качестве и подлинности",
+    "поддел": "сомнениях в качестве и подлинности",
+    "плох": "недовольстве качеством или ситуацией",
+    "ужас": "резком недовольстве и раздражении",
+    "кошмар": "резком недовольстве и раздражении",
+    "шантаж": "недоверии к участникам сюжета",
+    "позор": "осуждении и резкой критике",
+    "стыд": "осуждении и резкой критике",
+    "вран": "недоверии к информации",
+    "лж": "недоверии к информации",
+    "дур": "резком раздражении и оскорбительной реакции",
+    "ебан": "резком раздражении и оскорбительной реакции",
+    "развод": "ощущении обмана",
+}
+
 LOCATION_NOISE_ROOTS = {
     "барнаул",
     "москв",
@@ -3412,11 +3444,11 @@ class SummaryGenerator:
             elif derived_post_themes:
                 paragraphs.append(f"В текущем срезе заметнее всего сюжеты о {self._join_list(derived_post_themes[:4])}.")
 
-        if primary_mode in {"topic_report", "post_sentiment", "theme_sentiment"} and analyzed_comments > 0:
+        if primary_mode in {"topic_report", "theme_sentiment"} and analyzed_comments > 0:
             paragraphs.append(
                 f"По релевантным комментариям видно следующее распределение тональности: позитив {sentiment.get('positive_percent', 0)}%, негатив {sentiment.get('negative_percent', 0)}%, нейтрально {sentiment.get('neutral_percent', 0)}%."
             )
-        elif primary_mode in {"topic_report", "post_sentiment", "theme_sentiment"} and total_posts > 0 and analyzed_comments <= 0:
+        elif primary_mode in {"topic_report", "theme_sentiment"} and total_posts > 0 and analyzed_comments <= 0:
             paragraphs.append("Релевантных комментариев мало, поэтому вывод опирается прежде всего на метрики самих постов.")
 
         if confidence.get("level") == "low":
@@ -3428,6 +3460,113 @@ class SummaryGenerator:
             prompt = (prompt_text or "").strip() or "текущему запросу"
             return f"По запросу «{prompt}» пока не хватает устойчивых сигналов для точного ответа."
         return "\n\n".join(paragraphs).strip()
+
+    def _extract_signal_topics_from_examples(self, examples: list[dict], limit: int = 4) -> list[str]:
+        counter: Counter[str] = Counter()
+        for example in examples:
+            text = self._normalize_text(example.get("text") or "")
+            tokens = [
+                token
+                for token in re.findall(r"[a-zа-я0-9-]{4,}", text)
+                if token not in POST_THEME_STOPWORDS and token not in THEME_NOISE_TOKENS
+            ]
+            phrases: set[str] = set()
+            for size in (3, 2):
+                for index in range(0, max(len(tokens) - size + 1, 0)):
+                    phrase = " ".join(tokens[index:index + size]).strip()
+                    if len(phrase) >= 8:
+                        phrases.add(phrase)
+            if not phrases:
+                phrases.update(token for token in tokens if len(token) >= 5)
+            for phrase in phrases:
+                counter[phrase] += 1
+        return [self._titleize_phrase(phrase) for phrase, _ in counter.most_common(limit)]
+
+    def _comment_sentiment_hint_score(self, text: str) -> tuple[int, int]:
+        normalized = self._normalize_text(text or "")
+        positive = sum(1 for token in POSITIVE_REASON_HINTS if token in normalized)
+        negative = sum(1 for token in NEGATIVE_REASON_HINTS if token in normalized)
+        return positive, negative
+
+    def _filter_examples_for_requested_sentiment(self, examples: list[dict], sentiment: str) -> list[dict]:
+        if sentiment not in {"positive", "negative"}:
+            return examples
+
+        aligned: list[dict] = []
+        for example in examples:
+            positive_hits, negative_hits = self._comment_sentiment_hint_score(example.get("text") or "")
+            if positive_hits == 0 and negative_hits == 0:
+                aligned.append(example)
+                continue
+            if sentiment == "positive" and positive_hits >= negative_hits:
+                aligned.append(example)
+            if sentiment == "negative" and negative_hits >= positive_hits:
+                aligned.append(example)
+        return aligned or examples
+
+    def _build_reason_labels_from_examples(self, examples: list[dict], sentiment: str | None, limit: int = 3) -> list[str]:
+        if sentiment not in {"positive", "negative"}:
+            return []
+
+        hint_map = POSITIVE_REASON_HINTS if sentiment == "positive" else NEGATIVE_REASON_HINTS
+        counter: Counter[str] = Counter()
+        for example in examples:
+            normalized = self._normalize_text(example.get("text") or "")
+            for token, label in hint_map.items():
+                if token in normalized:
+                    counter[label] += 1
+
+        if counter:
+            return [label for label, _ in counter.most_common(limit)]
+
+        raw_topics = self._extract_signal_topics_from_examples(examples, limit=limit)
+        return [topic for topic in raw_topics if len(topic.split()) >= 2][:limit]
+
+    def _comment_reason_summary(self, examples: list[dict], sentiment_label: str, sentiment: str | None = None) -> str:
+        reason_labels = self._build_reason_labels_from_examples(examples, sentiment)
+        if reason_labels:
+            return f" В {sentiment_label} комментариях чаще всего говорят о {self._join_list(reason_labels)}."
+
+        phrase_topics = [item for item in self._extract_signal_topics_from_examples(examples, limit=3) if len(item.split()) >= 2]
+        if phrase_topics:
+            return f" В {sentiment_label} комментариях чаще всего обсуждают {self._join_list(phrase_topics)}."
+        return ""
+
+    def _examples_for_sentiment(self, item: dict, sentiment: str) -> list[dict]:
+        key_map = {
+            "positive": "positive_comment_examples",
+            "negative": "negative_comment_examples",
+            "neutral": "neutral_comment_examples",
+        }
+        fallback_map = {
+            "positive": "positive_examples",
+            "negative": "negative_examples",
+            "neutral": "neutral_examples",
+        }
+        examples = (item.get(key_map.get(sentiment, "")) or item.get(fallback_map.get(sentiment, "")) or [])
+        return self._filter_examples_for_requested_sentiment(examples, sentiment)
+
+    def _build_post_reason_snippet(self, post: dict, sentiment: str) -> str:
+        examples = self._examples_for_sentiment(post, sentiment)
+        if not examples:
+            return ""
+        sentiment_label = {
+            "positive": "позитивных",
+            "negative": "негативных",
+            "neutral": "нейтральных",
+        }.get(sentiment, "релевантных")
+        return f"{self._comment_reason_summary(examples, sentiment_label, sentiment=sentiment)}{self._comment_examples_phrase(examples)}"
+
+    def _build_theme_reason_snippet(self, theme: dict, sentiment: str) -> str:
+        examples = self._examples_for_sentiment(theme, sentiment)
+        if not examples:
+            return ""
+        sentiment_label = {
+            "positive": "позитивных",
+            "negative": "негативных",
+            "neutral": "нейтральных",
+        }.get(sentiment, "релевантных")
+        return f"{self._comment_reason_summary(examples, sentiment_label, sentiment=sentiment)}{self._comment_examples_phrase(examples)}"
 
     def _join_list(self, items: list[str]) -> str:
         cleaned = [item for item in items if item]
