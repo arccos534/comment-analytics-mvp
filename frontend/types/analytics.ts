@@ -77,6 +77,9 @@ export interface ReportPost {
   likes_count?: number | null;
   reposts_count?: number | null;
   reaction_tendency?: string | null;
+  positive_comment_examples?: ReportComment[];
+  negative_comment_examples?: ReportComment[];
+  neutral_comment_examples?: ReportComment[];
 }
 
 export interface ThemeReactionItem {
@@ -93,6 +96,9 @@ export interface ThemeReactionItem {
   negative_comments: number;
   neutral_comments: number;
   leading_post: ReportPost;
+  positive_examples?: ReportComment[];
+  negative_examples?: ReportComment[];
+  neutral_examples?: ReportComment[];
 }
 
 export interface FocusEvidenceItem {
@@ -156,6 +162,7 @@ export interface ReportSnapshot {
       post_theme?: string | null;
       post_keywords?: string[];
       requested_success_bucket_percent?: number | null;
+      requested_item_count?: number | null;
       period_from: string | null;
       period_to: string | null;
       platforms: string[];

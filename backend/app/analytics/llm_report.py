@@ -12,15 +12,16 @@ from redis import Redis
 from app.analytics.prompt_intent import (
     apply_analysis_mode_override as apply_shared_analysis_mode_override,
     build_prompt_intent as build_shared_prompt_intent,
+    extract_requested_count,
     extract_prompt_focus_terms as extract_shared_prompt_focus_terms,
 )
 from app.core.config import get_settings
 
 logger = logging.getLogger(__name__)
 
-SUMMARY_CACHE_VERSION = "v3"
-SUMMARY_PROMPT_VERSION = "structured-summary-v2"
-THEME_CACHE_VERSION = "v2"
+SUMMARY_CACHE_VERSION = "v4"
+SUMMARY_PROMPT_VERSION = "structured-summary-v3"
+THEME_CACHE_VERSION = "v3"
 THEME_PROMPT_VERSION = "theme-labels-v1"
 
 GENERIC_TOPICS = {
@@ -392,15 +393,17 @@ class SummaryGenerator:
         summary_payload = self._build_summary_payload(report_json, prompt_text)
         llm_bundle = self._generate_llm_summary_bundle(report_json, prompt_text, summary_payload)
         fallback_takeaways = self._build_takeaways_v2(report_json, summary_payload, prompt_text)
-        summary_text = (llm_bundle or {}).get("overview") or self._build_fallback_summary_v2(
+        fallback_summary = self._build_fallback_summary_v2(
             report_json,
             prompt_text,
             summary_payload,
         )
+        prefer_fallback = self._should_prefer_fallback_summary(summary_payload)
+        summary_text = fallback_summary if prefer_fallback else (llm_bundle or {}).get("overview") or fallback_summary
         request = summary_payload.get("analysis_request", {}) or {}
         return {
             "overview": summary_text,
-            "takeaways": (llm_bundle or {}).get("takeaways") or fallback_takeaways,
+            "takeaways": fallback_takeaways if prefer_fallback else (llm_bundle or {}).get("takeaways") or fallback_takeaways,
             "analysis_mode": (llm_bundle or {}).get("analysis_mode") or request.get("primary_mode") or "topic_report",
             "primary_mode": request.get("primary_mode") or "topic_report",
             "prompt_modes": request.get("prompt_mode") or [],
@@ -409,7 +412,7 @@ class SummaryGenerator:
             "request_contract": request.get("request_contract") or [],
             "answer_strategy": request.get("answer_strategy") or {},
             "confidence_assessment": summary_payload.get("confidence_assessment", {}),
-            "theme_reaction_map": summary_payload.get("theme_reaction_map", []),
+            "theme_reaction_map": summary_payload.get("prompt_related_theme_map") or summary_payload.get("theme_reaction_map", []),
             "focus_evidence": summary_payload.get("focus_evidence", []),
             "top_positive_posts": summary_payload.get("top_positive_posts", []),
             "top_negative_posts": summary_payload.get("top_negative_posts", []),
@@ -424,6 +427,30 @@ class SummaryGenerator:
         if not effort:
             return {}
         return {"reasoning_effort": effort}
+
+    def _should_prefer_fallback_summary(self, payload: dict) -> bool:
+        request = payload.get("analysis_request", {}) or {}
+        primary_mode = request.get("primary_mode") or "topic_report"
+        requested_item_count = int(request.get("requested_item_count") or 0)
+        prompt_modes = set(request.get("prompt_mode", []) or [])
+
+        if primary_mode in {
+            "source_comparison",
+            "post_popularity",
+            "post_underperformance",
+            "post_sentiment",
+            "theme_sentiment",
+            "theme_interest",
+            "theme_popularity",
+            "theme_underperformance",
+            "mixed",
+        }:
+            return True
+        if requested_item_count > 0:
+            return True
+        if {"successful_posts_bucket", "underperforming_posts_bucket"} & prompt_modes:
+            return True
+        return False
 
     def _completion_options(self) -> dict:
         options = dict(self._reasoning_options())
@@ -663,14 +690,20 @@ class SummaryGenerator:
     def _build_summary_payload(self, report_json: dict, prompt_text: str | None) -> dict:
         examples = report_json.get("examples", {})
         posts = report_json.get("posts", {})
-        matched_posts = (posts.get("matched", []) or [])[:8]
-        top_popular = (posts.get("top_popular", []) or [])[:5]
-        top_unpopular = (posts.get("top_unpopular", []) or [])[:5]
-        report_top_reacted = (posts.get("top_reacted", []) or [])[:5]
-        report_top_unreacted = (posts.get("top_unreacted", []) or [])[:5]
-        report_top_discussed = (posts.get("top_discussed", []) or [])[:5]
-        success_top_bucket = (posts.get("success_top_bucket", []) or [])[:8]
-        success_bottom_bucket = (posts.get("success_bottom_bucket", []) or [])[:8]
+        requested_item_count = (
+            extract_requested_count(prompt_text)
+            or int(report_json.get("meta", {}).get("requested_item_count") or 0)
+            or None
+        )
+        ranking_limit = max(requested_item_count or 0, 8)
+        matched_posts = (posts.get("matched", []) or [])[: max(ranking_limit, 8)]
+        top_popular = (posts.get("top_popular", []) or [])[:ranking_limit]
+        top_unpopular = (posts.get("top_unpopular", []) or [])[:ranking_limit]
+        report_top_reacted = (posts.get("top_reacted", []) or [])[:ranking_limit]
+        report_top_unreacted = (posts.get("top_unreacted", []) or [])[:ranking_limit]
+        report_top_discussed = (posts.get("top_discussed", []) or [])[:ranking_limit]
+        success_top_bucket = (posts.get("success_top_bucket", []) or [])[: max(ranking_limit, 8)]
+        success_bottom_bucket = (posts.get("success_bottom_bucket", []) or [])[: max(ranking_limit, 8)]
         source_comparison = (report_json.get("sources", {}).get("comparison", []) or [])[:8]
         declared_theme = (report_json.get("meta", {}).get("post_theme") or "").strip() or None
         has_explicit_scope = bool(declared_theme or report_json.get("meta", {}).get("post_keywords"))
@@ -686,6 +719,10 @@ class SummaryGenerator:
             declared_theme,
         )
         theme_basis_posts = theme_scoped_posts if declared_theme else (matched_posts + top_popular + top_unpopular)
+        requested_count = requested_item_count or self._default_display_count(
+            prompt_intent.primary_mode,
+            set(prompt_intent.prompt_mode or []),
+        )
         if declared_theme:
             top_discussed = sorted(
                 theme_scoped_posts,
@@ -696,7 +733,7 @@ class SummaryGenerator:
                     int(post.get("reposts_count", 0) or 0),
                 ),
                 reverse=True,
-            )[:5]
+            )[:ranking_limit]
         else:
             top_discussed = report_top_discussed or sorted(
                 matched_posts,
@@ -707,7 +744,7 @@ class SummaryGenerator:
                     int(post.get("reposts_count", 0) or 0),
                 ),
                 reverse=True,
-            )[:5]
+            )[:ranking_limit]
         ranking_posts = theme_basis_posts or matched_posts or top_popular or top_unpopular
         if declared_theme:
             top_reacted = sorted(
@@ -719,7 +756,7 @@ class SummaryGenerator:
                     post.get("reposts_count", 0),
                 ),
                 reverse=True,
-            )[:5]
+            )[:ranking_limit]
             least_reacted = sorted(
                 ranking_posts,
                 key=lambda post: (
@@ -728,7 +765,7 @@ class SummaryGenerator:
                     post.get("comments_count", 0),
                     post.get("reposts_count", 0),
                 ),
-            )[:5]
+            )[:ranking_limit]
             top_viewed = sorted(
                 ranking_posts,
                 key=lambda post: (
@@ -738,7 +775,7 @@ class SummaryGenerator:
                     post.get("reposts_count", 0),
                 ),
                 reverse=True,
-            )[:5]
+            )[:ranking_limit]
             least_viewed = sorted(
                 ranking_posts,
                 key=lambda post: (
@@ -747,7 +784,7 @@ class SummaryGenerator:
                     post.get("comments_count", 0),
                     post.get("reposts_count", 0),
                 ),
-            )[:5]
+            )[:ranking_limit]
         else:
             top_reacted = report_top_reacted or sorted(
                 ranking_posts,
@@ -758,7 +795,7 @@ class SummaryGenerator:
                     post.get("reposts_count", 0),
                 ),
                 reverse=True,
-            )[:5]
+            )[:ranking_limit]
             least_reacted = report_top_unreacted or sorted(
                 ranking_posts,
                 key=lambda post: (
@@ -767,7 +804,7 @@ class SummaryGenerator:
                     post.get("comments_count", 0),
                     post.get("reposts_count", 0),
                 ),
-            )[:5]
+            )[:ranking_limit]
             top_viewed = sorted(
                 top_popular or ranking_posts,
                 key=lambda post: (
@@ -777,7 +814,7 @@ class SummaryGenerator:
                     post.get("reposts_count", 0),
                 ),
                 reverse=True,
-            )[:5]
+            )[:ranking_limit]
             least_viewed = sorted(
                 top_unpopular or ranking_posts,
                 key=lambda post: (
@@ -786,7 +823,7 @@ class SummaryGenerator:
                     post.get("comments_count", 0),
                     post.get("reposts_count", 0),
                 ),
-            )[:5]
+            )[:ranking_limit]
         max_examples = max(self.settings.llm_summary_max_examples_per_bucket, 2)
 
         meaningful_topics = [
@@ -815,6 +852,7 @@ class SummaryGenerator:
             theme_basis_posts if declared_theme else matched_posts,
             [] if declared_theme else top_popular,
             [] if declared_theme else top_unpopular,
+            limit=max(requested_count, 6),
         )
         focus_evidence = self._build_prompt_focus_evidence(
             prompt_focus_terms,
@@ -846,6 +884,7 @@ class SummaryGenerator:
                 "request_contract": prompt_intent.request_contract,
                 "answer_strategy": prompt_intent.answer_strategy,
                 "prompt_focus_terms": prompt_focus_terms,
+                "requested_item_count": requested_count,
                 "success_bucket_percent": report_json.get("meta", {}).get("requested_success_bucket_percent"),
                 "period_from": report_json.get("meta", {}).get("period_from"),
                 "period_to": report_json.get("meta", {}).get("period_to"),
@@ -885,9 +924,9 @@ class SummaryGenerator:
             "least_reacted_posts": [self._compact_post(post) for post in least_reacted],
             "top_viewed_posts": [self._compact_post(post) for post in top_viewed],
             "least_viewed_posts": [self._compact_post(post) for post in least_viewed],
-            "top_positive_posts": [self._compact_post(post) for post in sorted(matched_posts, key=self._post_positive_key, reverse=True)[:5]],
-            "top_negative_posts": [self._compact_post(post) for post in sorted(matched_posts, key=self._post_negative_key, reverse=True)[:5]],
-            "theme_scoped_posts": [self._compact_post(post) for post in (theme_scoped_posts[:8] if theme_scoped_posts else [])],
+            "top_positive_posts": [self._compact_post(post) for post in self._select_sentiment_posts(matched_posts, "positive", ranking_limit)],
+            "top_negative_posts": [self._compact_post(post) for post in self._select_sentiment_posts(matched_posts, "negative", ranking_limit)],
+            "theme_scoped_posts": [self._compact_post(post) for post in (theme_scoped_posts[: max(ranking_limit, 8)] if theme_scoped_posts else [])],
             "top_popular_posts": [self._compact_post(post) for post in top_popular],
             "top_unpopular_posts": [self._compact_post(post) for post in top_unpopular],
             "top_success_posts": [self._compact_post(post) for post in success_top_bucket],
@@ -1019,12 +1058,13 @@ class SummaryGenerator:
         matched_posts: list[dict],
         top_popular_posts: list[dict],
         top_unpopular_posts: list[dict],
+        limit: int = 6,
     ) -> list[dict]:
         posts = matched_posts or top_popular_posts or top_unpopular_posts
         result: list[dict] = []
         seen_signatures: list[set[str]] = []
         used_leading_posts: set[str] = set()
-        for theme in themes[:6]:
+        for theme in themes[: max(limit, 1)]:
             matching = [post for post in posts if self._theme_matches_post(theme, post)]
             if not matching:
                 continue
@@ -1035,7 +1075,12 @@ class SummaryGenerator:
             positive_total = sum(int(post.get("positive_relevant_comments_count", 0) or 0) for post in matching)
             negative_total = sum(int(post.get("negative_relevant_comments_count", 0) or 0) for post in matching)
             neutral_total = sum(int(post.get("neutral_relevant_comments_count", 0) or 0) for post in matching)
-            leader = sorted(matching, key=self._post_success_key, reverse=True)[0]
+            if negative_total > positive_total:
+                leader = sorted(matching, key=self._post_negative_key, reverse=True)[0]
+            elif positive_total > negative_total:
+                leader = sorted(matching, key=self._post_positive_key, reverse=True)[0]
+            else:
+                leader = sorted(matching, key=self._post_success_key, reverse=True)[0]
             theme_label = self._normalize_theme_for_display(theme, matching)
             if not theme_label:
                 continue
@@ -1059,6 +1104,9 @@ class SummaryGenerator:
                     "positive_comments": positive_total,
                     "negative_comments": negative_total,
                     "neutral_comments": neutral_total,
+                    "positive_examples": self._collect_post_comment_examples(matching, "positive"),
+                    "negative_examples": self._collect_post_comment_examples(matching, "negative"),
+                    "neutral_examples": self._collect_post_comment_examples(matching, "neutral"),
                     "leading_post": self._compact_post(leader),
                 }
             )
@@ -1657,6 +1705,19 @@ class SummaryGenerator:
                 ordered.append(item)
         return ordered[:6]
 
+    def _extract_signal_topics_from_examples(self, examples: list[dict], limit: int = 4) -> list[str]:
+        counter: Counter[str] = Counter()
+        for example in examples:
+            text = self._normalize_text(example.get("text") or "")
+            tokens = [
+                token
+                for token in re.findall(r"[a-zа-я0-9-]{4,}", text)
+                if token not in POST_THEME_STOPWORDS and token not in THEME_NOISE_TOKENS
+            ]
+            for token in set(tokens):
+                counter[token] += 1
+        return [self._titleize_phrase(token) for token, _ in counter.most_common(limit)]
+
     def _compact_post(self, post: dict) -> dict:
         return {
             "post_id": post.get("post_id"),
@@ -1673,6 +1734,9 @@ class SummaryGenerator:
             "likes_count": post.get("likes_count", 0),
             "reposts_count": post.get("reposts_count", 0),
             "views_count": post.get("views_count", 0),
+            "positive_comment_examples": post.get("positive_comment_examples", []) or [],
+            "negative_comment_examples": post.get("negative_comment_examples", []) or [],
+            "neutral_comment_examples": post.get("neutral_comment_examples", []) or [],
             "reaction_tendency": self._reaction_label(
                 int(post.get("positive_relevant_comments_count", 0) or 0),
                 int(post.get("negative_relevant_comments_count", 0) or 0),
@@ -1680,12 +1744,129 @@ class SummaryGenerator:
             ),
         }
 
+    def _collect_post_comment_examples(self, posts: list[dict], sentiment: str, limit: int = 3) -> list[dict]:
+        key = f"{sentiment}_comment_examples"
+        collected: list[dict] = []
+        seen: set[str] = set()
+        for post in posts:
+            for example in post.get(key, []) or []:
+                fingerprint = (example.get("text") or "").strip().lower()
+                if not fingerprint or fingerprint in seen:
+                    continue
+                seen.add(fingerprint)
+                collected.append(example)
+                if len(collected) >= limit:
+                    return collected
+        return collected
+
+    def _limit_items(self, items: list[dict], requested_count: int | None, default_count: int) -> list[dict]:
+        limit = requested_count or default_count
+        return items[: max(limit, 1)]
+
+    def _comment_examples_phrase(self, examples: list[dict], limit: int = 2) -> str:
+        snippets: list[str] = []
+        for example in examples[:limit]:
+            text = self._shorten((example.get("text") or "").strip(), limit=140)
+            if text:
+                snippets.append(f"«{text}»")
+        if not snippets:
+            return ""
+        return f" Например, люди пишут: {self._join_list(snippets)}."
+
+    def _comment_reason_summary(self, examples: list[dict], sentiment_label: str) -> str:
+        topics = self._extract_signal_topics_from_examples(examples, limit=3)
+        if topics:
+            return f" Основные мотивы в {sentiment_label} комментариях — {self._join_list(topics)}."
+        return ""
+
+    def _examples_for_sentiment(self, item: dict, sentiment: str) -> list[dict]:
+        key_map = {
+            "positive": "positive_comment_examples",
+            "negative": "negative_comment_examples",
+            "neutral": "neutral_comment_examples",
+        }
+        fallback_map = {
+            "positive": "positive_examples",
+            "negative": "negative_examples",
+            "neutral": "neutral_examples",
+        }
+        return (item.get(key_map.get(sentiment, "")) or item.get(fallback_map.get(sentiment, "")) or [])
+
+    def _build_post_reason_snippet(self, post: dict, sentiment: str) -> str:
+        examples = self._examples_for_sentiment(post, sentiment)
+        if not examples:
+            return ""
+        sentiment_label = {
+            "positive": "позитивных",
+            "negative": "негативных",
+            "neutral": "нейтральных",
+        }.get(sentiment, "релевантных")
+        return f"{self._comment_reason_summary(examples, sentiment_label)}{self._comment_examples_phrase(examples)}"
+
+    def _build_theme_reason_snippet(self, theme: dict, sentiment: str) -> str:
+        examples = self._examples_for_sentiment(theme, sentiment)
+        if not examples:
+            return ""
+        sentiment_label = {
+            "positive": "позитивных",
+            "negative": "негативных",
+            "neutral": "нейтральных",
+        }.get(sentiment, "релевантных")
+        return f"{self._comment_reason_summary(examples, sentiment_label)}{self._comment_examples_phrase(examples)}"
+
+    def _format_ranked_posts(self, posts: list[dict], priority: str, limit: int) -> str:
+        lines: list[str] = []
+        for post in posts[:limit]:
+            lines.append(f"В«{post.get('post_text') or 'Пост без текста'}В» — {self._format_post_metrics(post, priority=priority)}")
+        return "; ".join(lines)
+
+    def _format_ranked_themes(self, themes: list[dict], limit: int) -> str:
+        lines: list[str] = []
+        for item in themes[:limit]:
+            metric_label = self._engagement_metric_label(item)
+            lines.append(
+                f"В«{item.get('theme') or 'Тема без названия'}В» — {int(item.get('comments_count', 0) or 0)} комментариев, "
+                f"{int(item.get('likes_count', 0) or 0)} {metric_label}, {int(item.get('reposts_count', 0) or 0)} репостов"
+            )
+        return "; ".join(lines)
+
     def _engagement_metric_label(self, post: dict) -> str:
         platform = (post.get("platform") or "") or ((post.get("leading_post") or {}).get("platform") or "")
         return "реакций" if platform == "telegram" else "лайков"
 
     def _source_metric_label(self, source: dict) -> str:
         return "реакций" if (source.get("platform") or "").lower() == "telegram" else "лайков"
+
+    def _default_display_count(self, primary_mode: str, prompt_modes: set[str] | list[str]) -> int:
+        mode_set = set(prompt_modes or [])
+        if primary_mode == "source_comparison":
+            return 5
+        if primary_mode in {"theme_sentiment", "theme_interest", "theme_popularity", "theme_underperformance"}:
+            return 5
+        if primary_mode == "mixed":
+            return 3
+        if primary_mode == "post_sentiment":
+            return 3 if {"negative_analysis", "positive_analysis"} & mode_set else 1
+        return 5
+
+    def _select_sentiment_posts(self, posts: list[dict], sentiment: str, limit: int) -> list[dict]:
+        if sentiment == "positive":
+            dominant_posts = [
+                post
+                for post in posts
+                if int(post.get("positive_relevant_comments_count", 0) or 0)
+                > int(post.get("negative_relevant_comments_count", 0) or 0)
+            ]
+            ranked = sorted(dominant_posts, key=self._post_positive_key, reverse=True)
+        else:
+            dominant_posts = [
+                post
+                for post in posts
+                if int(post.get("negative_relevant_comments_count", 0) or 0)
+                > int(post.get("positive_relevant_comments_count", 0) or 0)
+            ]
+            ranked = sorted(dominant_posts, key=self._post_negative_key, reverse=True)
+        return ranked[: max(limit, 1)]
 
     def _post_success_key(self, post: dict) -> tuple[int, int, int, int]:
         return (
@@ -1703,17 +1884,23 @@ class SummaryGenerator:
             int(post.get("reposts_count", 0) or 0),
         )
 
-    def _post_positive_key(self, post: dict) -> tuple[int, int, int, int]:
+    def _post_positive_key(self, post: dict) -> tuple[int, int, int, int, int]:
+        positive = int(post.get("positive_relevant_comments_count", 0) or 0)
+        negative = int(post.get("negative_relevant_comments_count", 0) or 0)
         return (
-            int(post.get("positive_relevant_comments_count", 0) or 0),
+            positive - negative,
+            positive,
             int(post.get("likes_count", 0) or 0),
             int(post.get("comments_count", 0) or 0),
             int(post.get("views_count", 0) or 0),
         )
 
-    def _post_negative_key(self, post: dict) -> tuple[int, int, int, int]:
+    def _post_negative_key(self, post: dict) -> tuple[int, int, int, int, int]:
+        positive = int(post.get("positive_relevant_comments_count", 0) or 0)
+        negative = int(post.get("negative_relevant_comments_count", 0) or 0)
         return (
-            int(post.get("negative_relevant_comments_count", 0) or 0),
+            negative - positive,
+            negative,
             int(post.get("comments_count", 0) or 0),
             int(post.get("likes_count", 0) or 0),
             int(post.get("views_count", 0) or 0),
@@ -1727,17 +1914,23 @@ class SummaryGenerator:
             int(post.get("reposts_count", 0) or 0),
         )
 
-    def _theme_positive_key(self, theme: dict) -> tuple[int, int, int, int]:
+    def _theme_positive_key(self, theme: dict) -> tuple[int, int, int, int, int]:
+        positive = int(theme.get("positive_comments", 0) or 0)
+        negative = int(theme.get("negative_comments", 0) or 0)
         return (
-            int(theme.get("positive_comments", 0) or 0),
+            positive - negative,
+            positive,
             int(theme.get("comments_count", 0) or 0),
             int(theme.get("posts_count", 0) or 0),
             int(theme.get("likes_count", 0) or 0),
         )
 
-    def _theme_negative_key(self, theme: dict) -> tuple[int, int, int, int]:
+    def _theme_negative_key(self, theme: dict) -> tuple[int, int, int, int, int]:
+        positive = int(theme.get("positive_comments", 0) or 0)
+        negative = int(theme.get("negative_comments", 0) or 0)
         return (
-            int(theme.get("negative_comments", 0) or 0),
+            negative - positive,
+            negative,
             int(theme.get("comments_count", 0) or 0),
             int(theme.get("posts_count", 0) or 0),
             int(theme.get("likes_count", 0) or 0),
@@ -1920,13 +2113,21 @@ class SummaryGenerator:
 
         if "negative_analysis" in mode_set and "positive_analysis" not in mode_set:
             ranked = sorted(items, key=self._theme_negative_key, reverse=True)
-            filtered = [item for item in ranked if int(item.get("negative_comments", 0) or 0) > 0]
-            return filtered or ranked
+            filtered = [
+                item
+                for item in ranked
+                if int(item.get("negative_comments", 0) or 0) > int(item.get("positive_comments", 0) or 0)
+            ]
+            return filtered
 
         if "positive_analysis" in mode_set and "negative_analysis" not in mode_set:
             ranked = sorted(items, key=self._theme_positive_key, reverse=True)
-            filtered = [item for item in ranked if int(item.get("positive_comments", 0) or 0) > 0]
-            return filtered or ranked
+            filtered = [
+                item
+                for item in ranked
+                if int(item.get("positive_comments", 0) or 0) > int(item.get("negative_comments", 0) or 0)
+            ]
+            return filtered
 
         if {"positive_analysis", "negative_analysis"} & mode_set:
             return sorted(
@@ -2229,7 +2430,7 @@ class SummaryGenerator:
 
         return "".join(parts).strip()
 
-    def _build_takeaways_v2(self, report_json: dict, payload: dict, prompt_text: str | None) -> list[str]:
+    def _build_takeaways_v2_legacy(self, report_json: dict, payload: dict, prompt_text: str | None) -> list[str]:
         stats = report_json.get("stats", {})
         analyzed_comments = int(stats.get("analyzed_comments", 0) or 0)
         total_posts = int(stats.get("total_posts", 0) or 0)
@@ -2238,6 +2439,8 @@ class SummaryGenerator:
         prompt_modes = set(request.get("prompt_mode", []) or [])
         primary_mode = request.get("primary_mode") or "topic_report"
         prompt_focus_terms = request.get("prompt_focus_terms", []) or []
+        requested_item_count = int(request.get("requested_item_count") or 0) or None
+        default_item_count = self._default_display_count(primary_mode, prompt_modes)
         success_bucket_percent = int(request.get("success_bucket_percent") or 20)
         success_bucket_label = f"{success_bucket_percent}%"
 
@@ -2259,6 +2462,7 @@ class SummaryGenerator:
             prompt_focus_terms,
         ) or payload.get("theme_reaction_map", []) or []
         theme_map = self._prioritize_theme_map_for_request(theme_map, prompt_modes)
+        theme_items = self._limit_items(theme_map, requested_item_count, default_item_count)
         style_gap = payload.get("style_gap", {}) or {}
         wants_success_buckets = bool({"successful_posts_bucket", "underperforming_posts_bucket"} & prompt_modes)
         wants_theme_polarity = bool({"negative_analysis", "positive_analysis"} & prompt_modes)
@@ -2307,11 +2511,7 @@ class SummaryGenerator:
                 )
             return list(dict.fromkeys(takeaways))[:3]
 
-        if focus_evidence and primary_mode in {"topic_report", "mixed", "theme_interest", "theme_sentiment"} and not (
-            primary_mode == "mixed" and wants_success_buckets
-        ) and not (
-            primary_mode == "theme_sentiment" and wants_theme_polarity
-        ):
+        if focus_evidence and primary_mode == "topic_report":
             lead = focus_evidence[0]
             matched_terms = ", ".join(lead.get("matched_terms", [])[:3])
             post = lead.get("post", {})
@@ -2334,12 +2534,12 @@ class SummaryGenerator:
                 )
         elif primary_mode == "post_sentiment":
             if "most_negative_post" in prompt_modes and top_negative_posts:
-                lead_post = sorted(top_negative_posts, key=self._post_negative_key, reverse=True)[0]
+                lead_post = top_negative_posts[0]
                 takeaways.append(
                     f"Наибольший негатив вызвал пост «{lead_post['post_text']}»: {lead_post.get('negative_relevant_comments_count', 0)} негативных релевантных комментариев и {self._format_post_metrics(lead_post, priority='comments')}."
                 )
             elif "most_positive_post" in prompt_modes and top_positive_posts:
-                lead_post = sorted(top_positive_posts, key=self._post_positive_key, reverse=True)[0]
+                lead_post = top_positive_posts[0]
                 takeaways.append(
                     f"Наиболее позитивную реакцию вызвал пост «{lead_post['post_text']}»: {lead_post.get('positive_relevant_comments_count', 0)} позитивных релевантных комментариев и {self._format_post_metrics(lead_post, priority='comments')}."
                 )
@@ -2472,7 +2672,7 @@ class SummaryGenerator:
 
         return list(dict.fromkeys(item for item in takeaways if item))[:3]
 
-    def _build_fallback_summary_v2(self, report_json: dict, prompt_text: str | None, payload: dict) -> str:
+    def _build_fallback_summary_v2_legacy(self, report_json: dict, prompt_text: str | None, payload: dict) -> str:
         stats = report_json.get("stats", {})
         sentiment = report_json.get("sentiment", {})
         request = payload["analysis_request"]
@@ -2737,6 +2937,496 @@ class SummaryGenerator:
         if not paragraphs:
             return f"По запросу «{prompt}» пока не хватает устойчивых сигналов для точного ответа."
 
+        return "\n\n".join(paragraphs).strip()
+
+    def _build_takeaways_v2(self, report_json: dict, payload: dict, prompt_text: str | None) -> list[str]:
+        stats = report_json.get("stats", {})
+        analyzed_comments = int(stats.get("analyzed_comments", 0) or 0)
+        total_posts = int(stats.get("total_posts", 0) or 0)
+        confidence = payload.get("confidence_assessment", {}) or {}
+        request = payload.get("analysis_request", {}) or {}
+        prompt_modes = set(request.get("prompt_mode", []) or [])
+        primary_mode = request.get("primary_mode") or "topic_report"
+        prompt_focus_terms = request.get("prompt_focus_terms", []) or []
+        requested_item_count = int(request.get("requested_item_count") or 0) or None
+        default_item_count = self._default_display_count(primary_mode, prompt_modes)
+        requested_count = requested_item_count or default_item_count
+        success_bucket_percent = int(request.get("success_bucket_percent") or 20)
+        success_bucket_label = f"{success_bucket_percent}%"
+
+        matched_posts = payload.get("matched_posts", []) or []
+        focus_evidence = payload.get("focus_evidence", []) or []
+        source_comparison = sorted(payload.get("source_comparison_map", []) or [], key=self._source_success_key, reverse=True)
+        top_discussed_posts = payload.get("top_discussed_posts", []) or []
+        top_reacted_posts = payload.get("top_reacted_posts", []) or []
+        top_positive_posts = payload.get("top_positive_posts", []) or []
+        top_negative_posts = payload.get("top_negative_posts", []) or []
+        least_reacted_posts = payload.get("least_reacted_posts", []) or []
+        top_viewed_posts = payload.get("top_viewed_posts", []) or []
+        least_viewed_posts = payload.get("least_viewed_posts", []) or []
+        top_success_posts = payload.get("top_success_posts", []) or []
+        bottom_success_posts = payload.get("bottom_success_posts", []) or []
+        theme_map = payload.get("prompt_related_theme_map", []) or self._filter_prompt_related_themes(
+            payload.get("theme_reaction_map", []) or [],
+            focus_evidence,
+            prompt_focus_terms,
+        ) or payload.get("theme_reaction_map", []) or []
+        theme_map = self._prioritize_theme_map_for_request(theme_map, prompt_modes)
+        theme_items = self._limit_items(theme_map, requested_item_count, default_item_count)
+        style_gap = payload.get("style_gap", {}) or {}
+        wants_success_buckets = bool({"successful_posts_bucket", "underperforming_posts_bucket"} & prompt_modes)
+
+        if request.get("theme_of_posts"):
+            top_discussed_posts = payload.get("theme_scoped_posts", []) or top_discussed_posts
+
+        single_post = matched_posts[0] if len(matched_posts) == 1 else None
+        if single_post is None:
+            seen_post_keys: set[str] = set()
+            unique_posts: list[dict] = []
+            for post_group in (matched_posts, top_reacted_posts, top_viewed_posts, top_discussed_posts, top_success_posts):
+                for post in post_group:
+                    post_key = str(post.get("post_id") or post.get("post_url") or "")
+                    if not post_key or post_key in seen_post_keys:
+                        continue
+                    seen_post_keys.add(post_key)
+                    unique_posts.append(post)
+            if len(unique_posts) == 1:
+                single_post = unique_posts[0]
+
+        takeaways: list[str] = []
+        if confidence.get("level") == "low":
+            takeaways.append(
+                f"Выборка небольшая: {total_posts} постов и {analyzed_comments} релевантных комментариев, поэтому выводы предварительные."
+            )
+
+        if primary_mode == "source_comparison" and source_comparison:
+            lead_source = source_comparison[0]
+            takeaways.append(
+                f"По совокупности метрик лидирует источник «{lead_source.get('source_title') or lead_source.get('source_url') or 'без названия'}»: в среднем {self._format_source_metrics(lead_source)}."
+            )
+            if len(source_comparison) > 1:
+                runner_up = source_comparison[1]
+                takeaways.append(
+                    f"Ближайший к нему по эффективности источник — «{runner_up.get('source_title') or runner_up.get('source_url') or 'без названия'}»."
+                )
+            if len(source_comparison) > 2:
+                top_titles = [item.get("source_title") or item.get("source_url") or "без названия" for item in source_comparison[: min(requested_count, 5)]]
+                takeaways.append(f"Для сравнения в отчёте стоит смотреть топ источников: {self._join_list(top_titles)}.")
+            return list(dict.fromkeys(item for item in takeaways if item))[:3]
+
+        if primary_mode == "post_sentiment":
+            if "most_negative_post" in prompt_modes and top_negative_posts:
+                lead_post = top_negative_posts[0]
+                takeaways.append(
+                    f"Больше всего негатива вызвал пост «{lead_post['post_text']}»: {lead_post.get('negative_relevant_comments_count', 0)} негативных комментариев против {lead_post.get('positive_relevant_comments_count', 0)} позитивных."
+                )
+                reason = self._build_post_reason_snippet(lead_post, "negative").strip()
+                if reason:
+                    takeaways.append(f"Почему так: {reason}")
+            elif "most_positive_post" in prompt_modes and top_positive_posts:
+                lead_post = top_positive_posts[0]
+                takeaways.append(
+                    f"Больше всего позитива вызвал пост «{lead_post['post_text']}»: {lead_post.get('positive_relevant_comments_count', 0)} позитивных комментариев против {lead_post.get('negative_relevant_comments_count', 0)} негативных."
+                )
+                reason = self._build_post_reason_snippet(lead_post, "positive").strip()
+                if reason:
+                    takeaways.append(f"Почему так: {reason}")
+            elif "most_negative_post" in prompt_modes:
+                takeaways.append("В текущей выборке нет поста с устойчиво негативной реакцией: негативные комментарии не перевешивают позитивные.")
+            elif "most_positive_post" in prompt_modes:
+                takeaways.append("В текущей выборке нет поста с устойчиво позитивной реакцией: позитивные комментарии не перевешивают негативные.")
+            elif single_post:
+                takeaways.append(
+                    f"В центре запроса один пост — «{single_post['post_text']}». По нему видно {self._format_post_metrics(single_post, priority='comments' if analyzed_comments > 0 else 'success')}."
+                )
+                dominant = "negative" if int(single_post.get("negative_relevant_comments_count", 0) or 0) > int(single_post.get("positive_relevant_comments_count", 0) or 0) else "positive"
+                reason = self._build_post_reason_snippet(single_post, dominant).strip()
+                if reason:
+                    takeaways.append(f"Что пишут люди: {reason}")
+            return list(dict.fromkeys(item for item in takeaways if item))[:3]
+
+        if primary_mode == "post_popularity":
+            if ("most_reacted_post" in prompt_modes or "highest_reactions" in prompt_modes) and top_reacted_posts:
+                lead_post = top_reacted_posts[0]
+                takeaways.append(f"Лидер по лайкам или реакциям — пост «{lead_post['post_text']}»: {self._format_post_metrics(lead_post, priority='reactions')}.")
+            elif ("most_viewed_post" in prompt_modes or "highest_views" in prompt_modes) and top_viewed_posts:
+                lead_post = top_viewed_posts[0]
+                takeaways.append(f"Лидер по просмотрам — пост «{lead_post['post_text']}»: {self._format_post_metrics(lead_post, priority='views')}.")
+            elif "most_discussed_news" in prompt_modes and top_discussed_posts:
+                lead_post = top_discussed_posts[0]
+                takeaways.append(f"Самый обсуждаемый пост — «{lead_post['post_text']}»: {self._format_post_metrics(lead_post, priority='comments')}.")
+            elif top_success_posts:
+                lead_post = top_success_posts[0]
+                takeaways.append(f"Лидер по метрикам в текущем срезе — пост «{lead_post['post_text']}»: {self._format_post_metrics(lead_post, priority='success')}.")
+            if wants_success_buckets and top_success_posts:
+                takeaways.append(f"Верхние {success_bucket_label} по успешности: {self._format_ranked_posts(top_success_posts, 'success', min(requested_count, 3))}.")
+            return list(dict.fromkeys(item for item in takeaways if item))[:3]
+
+        if primary_mode == "post_underperformance":
+            if ("least_reacted_post" in prompt_modes or "lowest_reactions" in prompt_modes) and least_reacted_posts:
+                weakest_post = least_reacted_posts[0]
+                takeaways.append(f"Самый слабый пост по лайкам или реакциям — «{weakest_post['post_text']}»: {self._format_post_metrics(weakest_post, priority='reactions')}.")
+            elif ("least_viewed_post" in prompt_modes or "lowest_views" in prompt_modes) and least_viewed_posts:
+                weakest_post = least_viewed_posts[0]
+                takeaways.append(f"Самый слабый пост по просмотрам — «{weakest_post['post_text']}»: {self._format_post_metrics(weakest_post, priority='views')}.")
+            elif bottom_success_posts:
+                weakest_post = bottom_success_posts[0]
+                takeaways.append(f"Наименее успешный пост — «{weakest_post['post_text']}»: {self._format_post_metrics(weakest_post, priority='success')}.")
+            if wants_success_buckets and bottom_success_posts:
+                takeaways.append(f"Нижние {success_bucket_label} по успешности: {self._format_ranked_posts(bottom_success_posts, 'success', min(requested_count, 3))}.")
+            return list(dict.fromkeys(item for item in takeaways if item))[:3]
+
+        if primary_mode == "mixed" and wants_success_buckets:
+            if top_success_posts:
+                takeaways.append(f"Верхние {success_bucket_label} по успешности: {self._format_ranked_posts(top_success_posts, 'success', min(requested_count, 3))}.")
+            if bottom_success_posts:
+                takeaways.append(f"Нижние {success_bucket_label} по успешности: {self._format_ranked_posts(bottom_success_posts, 'success', min(requested_count, 3))}.")
+            style_gap_explanation = self._build_style_gap_explanation(style_gap)
+            if style_gap_explanation:
+                takeaways.append(style_gap_explanation)
+            return list(dict.fromkeys(item for item in takeaways if item))[:3]
+
+        if primary_mode == "theme_sentiment" and theme_items:
+            top_names = [item["theme"] for item in theme_items[: min(len(theme_items), 3)]]
+            if "negative_analysis" in prompt_modes and "positive_analysis" not in prompt_modes:
+                takeaways.append(f"Наиболее негативную реакцию собирают темы {self._join_list(top_names)}.")
+                reason = self._build_theme_reason_snippet(theme_items[0], "negative").strip()
+                if reason:
+                    takeaways.append(f"Почему аудитория реагирует негативно: {reason}")
+            elif "positive_analysis" in prompt_modes and "negative_analysis" not in prompt_modes:
+                takeaways.append(f"Наиболее позитивную реакцию собирают темы {self._join_list(top_names)}.")
+                reason = self._build_theme_reason_snippet(theme_items[0], "positive").strip()
+                if reason:
+                    takeaways.append(f"Почему аудитория реагирует позитивно: {reason}")
+            else:
+                positive_theme = next((item for item in theme_items if int(item.get('positive_comments', 0) or 0) > int(item.get('negative_comments', 0) or 0)), None)
+                negative_theme = next((item for item in theme_items if int(item.get('negative_comments', 0) or 0) > int(item.get('positive_comments', 0) or 0)), None)
+                if positive_theme and negative_theme:
+                    takeaways.append(f"Сильнее всего аудитория поддерживает тему «{positive_theme['theme']}», а наибольший негатив вызывает тема «{negative_theme['theme']}».")
+            return list(dict.fromkeys(item for item in takeaways if item))[:3]
+        elif primary_mode == "theme_sentiment" and {"negative_analysis", "positive_analysis"} & prompt_modes:
+            if "negative_analysis" in prompt_modes and "positive_analysis" not in prompt_modes:
+                takeaways.append("В текущей выборке нет тем с устойчиво негативной реакцией: негативные комментарии не перевешивают позитивные.")
+            elif "positive_analysis" in prompt_modes and "negative_analysis" not in prompt_modes:
+                takeaways.append("В текущей выборке нет тем с устойчиво позитивной реакцией: позитивные комментарии не перевешивают негативные.")
+            return list(dict.fromkeys(item for item in takeaways if item))[:3]
+
+        if primary_mode == "theme_interest" and theme_items:
+            takeaways.append(f"Больше всего интереса аудитории собирают темы {self._join_list([item['theme'] for item in theme_items[: min(len(theme_items), 3)]])}.")
+            takeaways.append(f"По метрикам лидируют: {self._format_ranked_themes(theme_items, min(requested_count, 3))}.")
+            return list(dict.fromkeys(item for item in takeaways if item))[:3]
+
+        if primary_mode == "theme_popularity" and theme_items:
+            takeaways.append(f"Самые популярные темы в текущем срезе — {self._join_list([item['theme'] for item in theme_items[: min(len(theme_items), 3)]])}.")
+            takeaways.append(f"Их метрики: {self._format_ranked_themes(theme_items, min(requested_count, 3))}.")
+            return list(dict.fromkeys(item for item in takeaways if item))[:3]
+
+        if primary_mode == "theme_underperformance" and theme_items:
+            takeaways.append(f"Слабее всего выглядят темы {self._join_list([item['theme'] for item in theme_items[: min(len(theme_items), 3)]])}.")
+            takeaways.append(f"Их метрики: {self._format_ranked_themes(theme_items, min(requested_count, 3))}.")
+            return list(dict.fromkeys(item for item in takeaways if item))[:3]
+
+        if primary_mode == "topic_report":
+            if single_post:
+                takeaways.append(f"В центре запроса один пост — «{single_post['post_text']}». По нему видно {self._format_post_metrics(single_post, priority='comments' if analyzed_comments > 0 else 'success')}.")
+                if analyzed_comments > 0:
+                    dominant = "negative" if int(single_post.get('negative_relevant_comments_count', 0) or 0) > int(single_post.get('positive_relevant_comments_count', 0) or 0) else "positive"
+                    reason = self._build_post_reason_snippet(single_post, dominant).strip()
+                    if reason:
+                        takeaways.append(f"Что пишут люди: {reason}")
+            elif focus_evidence:
+                lead = focus_evidence[0]
+                matched_terms = ", ".join(lead.get("matched_terms", [])[:3])
+                post = lead.get("post", {})
+                if matched_terms:
+                    takeaways.append(f"Ближе всего к запросу относится сюжет «{post.get('post_text') or 'ключевая публикация'}», связанный с темами {matched_terms}.")
+            elif theme_items:
+                takeaways.append(f"Главные темы текущего среза — {self._join_list([item['theme'] for item in theme_items[: min(len(theme_items), 3)]])}.")
+
+        if not takeaways and top_discussed_posts:
+            lead_post = top_discussed_posts[0]
+            takeaways.append(f"Наиболее обсуждаемым оказался пост «{lead_post['post_text']}» с {lead_post['comments_count']} комментариями.")
+        if not takeaways and prompt_text:
+            takeaways.append(f"По запросу «{prompt_text.strip()}» в выборке пока не хватает устойчивых аналитических сигналов.")
+        return list(dict.fromkeys(item for item in takeaways if item))[:3]
+
+    def _build_fallback_summary_v2(self, report_json: dict, prompt_text: str | None, payload: dict) -> str:
+        stats = report_json.get("stats", {})
+        sentiment = report_json.get("sentiment", {})
+        request = payload["analysis_request"]
+        primary_mode = request.get("primary_mode") or "topic_report"
+        prompt_modes = set(request.get("prompt_mode", []) or [])
+        declared_theme = request.get("theme_of_posts")
+        success_bucket_percent = int(request.get("success_bucket_percent") or 20)
+        success_bucket_label = f"{success_bucket_percent}%"
+        requested_item_count = int(request.get("requested_item_count") or 0) or None
+        default_item_count = self._default_display_count(primary_mode, prompt_modes)
+        requested_count = requested_item_count or default_item_count
+
+        total_posts = int(stats.get("total_posts", 0) or 0)
+        analyzed_comments = int(stats.get("analyzed_comments", 0) or 0)
+        derived_post_themes = payload.get("derived_post_themes", []) or []
+        theme_map = payload.get("prompt_related_theme_map", []) or payload.get("theme_reaction_map", []) or []
+        theme_map = self._prioritize_theme_map_for_request(theme_map, prompt_modes)
+        theme_items = self._limit_items(theme_map, requested_item_count, default_item_count)
+        matched_posts = payload.get("matched_posts", []) or []
+        focus_evidence = payload.get("focus_evidence", []) or []
+        source_comparison = sorted(payload.get("source_comparison_map", []) or [], key=self._source_success_key, reverse=True)
+        top_discussed_posts = payload.get("top_discussed_posts", []) or []
+        top_reacted_posts = payload.get("top_reacted_posts", []) or []
+        top_positive_posts = payload.get("top_positive_posts", []) or []
+        top_negative_posts = payload.get("top_negative_posts", []) or []
+        least_reacted_posts = payload.get("least_reacted_posts", []) or []
+        top_viewed_posts = payload.get("top_viewed_posts", []) or []
+        least_viewed_posts = payload.get("least_viewed_posts", []) or []
+        top_success_posts = payload.get("top_success_posts", []) or []
+        bottom_success_posts = payload.get("bottom_success_posts", []) or []
+        style_gap = payload.get("style_gap", {}) or {}
+        confidence = payload.get("confidence_assessment", {}) or {}
+        wants_success_buckets = bool({"successful_posts_bucket", "underperforming_posts_bucket"} & prompt_modes)
+
+        single_post = matched_posts[0] if len(matched_posts) == 1 else None
+        if single_post is None:
+            seen_post_keys: set[str] = set()
+            unique_posts: list[dict] = []
+            for post_group in (matched_posts, top_reacted_posts, top_viewed_posts, top_discussed_posts, top_success_posts):
+                for post in post_group:
+                    post_key = str(post.get("post_id") or post.get("post_url") or "")
+                    if not post_key or post_key in seen_post_keys:
+                        continue
+                    seen_post_keys.add(post_key)
+                    unique_posts.append(post)
+            if len(unique_posts) == 1:
+                single_post = unique_posts[0]
+
+        if analyzed_comments <= 0 and total_posts <= 0 and not source_comparison:
+            return (
+                "По текущему срезу не найдено постов или комментариев, на которых можно опереться. "
+                "Для содержательного ответа нужно расширить период, тему или набор источников."
+            )
+
+        paragraphs: list[str] = []
+
+        if primary_mode == "source_comparison" and source_comparison:
+            lead = source_comparison[0]
+            paragraphs.append(
+                f"Лидирующим источником по активности аудитории выглядит «{lead.get('source_title') or lead.get('source_url') or 'без названия'}». "
+                f"По его публикациям в среднем видно {self._format_source_metrics(lead)}."
+            )
+            top_sources = source_comparison[: min(requested_count, 5)]
+            if len(top_sources) > 1:
+                source_lines = [
+                    f"«{item.get('source_title') or item.get('source_url') or 'без названия'}» — {self._format_source_metrics(item)}"
+                    for item in top_sources
+                ]
+                paragraphs.append(f"Топ источников в текущем срезе: {'; '.join(source_lines)}.")
+
+        elif primary_mode == "post_sentiment":
+            if "most_negative_post" in prompt_modes and top_negative_posts:
+                lead = top_negative_posts[0]
+                paragraphs.append(
+                    f"Наибольший негатив аудитории вызвал пост «{lead['post_text']}». "
+                    f"По нему видно {lead.get('negative_relevant_comments_count', 0)} негативных релевантных комментариев против {lead.get('positive_relevant_comments_count', 0)} позитивных, а также {self._format_post_metrics(lead, priority='comments')}."
+                )
+                reason = self._build_post_reason_snippet(lead, "negative").strip()
+                if reason:
+                    paragraphs.append(f"Почему аудитория отнеслась к посту негативно: {reason}")
+            elif "most_positive_post" in prompt_modes and top_positive_posts:
+                lead = top_positive_posts[0]
+                paragraphs.append(
+                    f"Наиболее позитивную реакцию вызвал пост «{lead['post_text']}». "
+                    f"По нему видно {lead.get('positive_relevant_comments_count', 0)} позитивных релевантных комментариев против {lead.get('negative_relevant_comments_count', 0)} негативных, а также {self._format_post_metrics(lead, priority='comments')}."
+                )
+                reason = self._build_post_reason_snippet(lead, "positive").strip()
+                if reason:
+                    paragraphs.append(f"Почему аудитория отнеслась к посту позитивно: {reason}")
+            elif "most_negative_post" in prompt_modes:
+                paragraphs.append("В текущей выборке нет поста с устойчиво негативной реакцией: негативные комментарии не перевешивают позитивные.")
+            elif "most_positive_post" in prompt_modes:
+                paragraphs.append("В текущей выборке нет поста с устойчиво позитивной реакцией: позитивные комментарии не перевешивают негативные.")
+            elif single_post:
+                paragraphs.append(
+                    f"В выборке один пост — «{single_post['post_text']}». По нему видно {self._format_post_metrics(single_post, priority='comments' if analyzed_comments > 0 else 'success')}."
+                )
+                positive_count = int(single_post.get("positive_relevant_comments_count", 0) or 0)
+                negative_count = int(single_post.get("negative_relevant_comments_count", 0) or 0)
+                neutral_count = int(single_post.get("neutral_relevant_comments_count", 0) or 0)
+                paragraphs.append(
+                    f"По релевантным комментариям к самому посту распределение такое: позитивных {positive_count}, негативных {negative_count}, нейтральных {neutral_count}."
+                )
+                dominant = "negative" if negative_count > positive_count else "positive"
+                reason = self._build_post_reason_snippet(single_post, dominant).strip()
+                if reason:
+                    paragraphs.append(f"Что люди думают о публикации: {reason}")
+
+        elif primary_mode == "post_popularity":
+            if ("most_reacted_post" in prompt_modes or "highest_reactions" in prompt_modes) and top_reacted_posts:
+                lead = top_reacted_posts[0]
+                paragraphs.append(
+                    f"Постом с самым большим количеством лайков или реакций выглядит «{lead['post_text']}». "
+                    f"Он собрал {self._format_post_metrics(lead, priority='reactions')}."
+                )
+            elif ("most_viewed_post" in prompt_modes or "highest_views" in prompt_modes) and top_viewed_posts:
+                lead = top_viewed_posts[0]
+                paragraphs.append(
+                    f"Постом с самым большим количеством просмотров выглядит «{lead['post_text']}». "
+                    f"Он собрал {self._format_post_metrics(lead, priority='views')}."
+                )
+            elif "most_discussed_news" in prompt_modes and top_discussed_posts:
+                lead = top_discussed_posts[0]
+                paragraphs.append(
+                    f"Самой обсуждаемой публикацией выглядит «{lead['post_text']}». "
+                    f"По ней видно {self._format_post_metrics(lead, priority='comments')}."
+                )
+            elif top_success_posts:
+                lead = top_success_posts[0]
+                paragraphs.append(
+                    f"Лидером по совокупности доступных метрик выглядит пост «{lead['post_text']}». "
+                    f"Он собрал {self._format_post_metrics(lead, priority='success')}."
+                )
+            if wants_success_buckets and top_success_posts:
+                paragraphs.append(
+                    f"В верхние {success_bucket_label} по успешности входят: {self._format_ranked_posts(top_success_posts, 'success', min(requested_count, 5))}."
+                )
+
+        elif primary_mode == "post_underperformance":
+            if ("least_reacted_post" in prompt_modes or "lowest_reactions" in prompt_modes) and least_reacted_posts:
+                weakest = least_reacted_posts[0]
+                paragraphs.append(
+                    f"Наименьший отклик по лайкам или реакциям у поста «{weakest['post_text']}»: {self._format_post_metrics(weakest, priority='reactions')}."
+                )
+            elif ("least_viewed_post" in prompt_modes or "lowest_views" in prompt_modes) and least_viewed_posts:
+                weakest = least_viewed_posts[0]
+                paragraphs.append(
+                    f"Наименьший охват у поста «{weakest['post_text']}»: {self._format_post_metrics(weakest, priority='views')}."
+                )
+            elif bottom_success_posts:
+                weakest = bottom_success_posts[0]
+                paragraphs.append(
+                    f"Наименее успешным постом выглядит «{weakest['post_text']}». У него {self._format_post_metrics(weakest, priority='success')}."
+                )
+            if wants_success_buckets and bottom_success_posts:
+                paragraphs.append(
+                    f"В нижние {success_bucket_label} по успешности входят: {self._format_ranked_posts(bottom_success_posts, 'success', min(requested_count, 5))}."
+                )
+
+        elif primary_mode == "mixed" and wants_success_buckets:
+            if top_success_posts:
+                paragraphs.append(
+                    f"В верхние {success_bucket_label} по успешности входят посты с самыми сильными сочетаниями просмотров, лайков или реакций и вторичных метрик: {self._format_ranked_posts(top_success_posts, 'success', min(requested_count, 5))}."
+                )
+            if bottom_success_posts:
+                paragraphs.append(
+                    f"В нижние {success_bucket_label} по успешности входят посты с самыми слабыми метриками: {self._format_ranked_posts(bottom_success_posts, 'success', min(requested_count, 5))}."
+                )
+            style_gap_explanation = self._build_style_gap_explanation(style_gap)
+            if style_gap_explanation:
+                paragraphs.append(style_gap_explanation)
+            if top_success_posts:
+                reason = self._build_post_reason_snippet(top_success_posts[0], "positive").strip()
+                if reason:
+                    paragraphs.append(f"Что поддерживает успех лидеров: {reason}")
+            if bottom_success_posts:
+                weak_reason = self._build_post_reason_snippet(bottom_success_posts[0], "negative").strip()
+                if weak_reason:
+                    paragraphs.append(f"Что тянет слабые посты вниз: {weak_reason}")
+
+        elif primary_mode == "theme_sentiment" and theme_items:
+            theme_slice = theme_items[: min(len(theme_items), requested_count)]
+            if "negative_analysis" in prompt_modes and "positive_analysis" not in prompt_modes:
+                paragraphs.append(
+                    f"Наиболее негативную реакцию вызывают темы {self._join_list([item['theme'] for item in theme_slice])}."
+                )
+                for item in theme_slice:
+                    reason = self._build_theme_reason_snippet(item, "negative").strip()
+                    line = f"Тема «{item['theme']}»: {int(item.get('negative_comments', 0) or 0)} негативных комментариев против {int(item.get('positive_comments', 0) or 0)} позитивных."
+                    if reason:
+                        line += f" {reason}"
+                    paragraphs.append(line)
+            elif "positive_analysis" in prompt_modes and "negative_analysis" not in prompt_modes:
+                paragraphs.append(
+                    f"Наиболее позитивную реакцию вызывают темы {self._join_list([item['theme'] for item in theme_slice])}."
+                )
+                for item in theme_slice:
+                    reason = self._build_theme_reason_snippet(item, "positive").strip()
+                    line = f"Тема «{item['theme']}»: {int(item.get('positive_comments', 0) or 0)} позитивных комментариев против {int(item.get('negative_comments', 0) or 0)} негативных."
+                    if reason:
+                        line += f" {reason}"
+                    paragraphs.append(line)
+            else:
+                positive_theme = next((item for item in theme_slice if int(item.get("positive_comments", 0) or 0) > int(item.get("negative_comments", 0) or 0)), None)
+                negative_theme = next((item for item in theme_slice if int(item.get("negative_comments", 0) or 0) > int(item.get("positive_comments", 0) or 0)), None)
+                if positive_theme and negative_theme:
+                    paragraphs.append(
+                        f"Наиболее позитивную реакцию собирает тема «{positive_theme['theme']}», а наиболее негативную — тема «{negative_theme['theme']}»."
+                    )
+                for item, sentiment_key in ((negative_theme, "negative"), (positive_theme, "positive")):
+                    if item:
+                        reason = self._build_theme_reason_snippet(item, sentiment_key).strip()
+                        if reason:
+                            paragraphs.append(f"Тема «{item['theme']}»: {reason}")
+        elif primary_mode == "theme_sentiment" and {"negative_analysis", "positive_analysis"} & prompt_modes:
+            if "negative_analysis" in prompt_modes and "positive_analysis" not in prompt_modes:
+                paragraphs.append("В текущей выборке нет тем с устойчиво негативной реакцией: негативные комментарии не перевешивают позитивные.")
+            elif "positive_analysis" in prompt_modes and "negative_analysis" not in prompt_modes:
+                paragraphs.append("В текущей выборке нет тем с устойчиво позитивной реакцией: позитивные комментарии не перевешивают негативные.")
+
+        elif primary_mode == "theme_interest" and theme_items:
+            theme_slice = theme_items[: min(len(theme_items), requested_count)]
+            paragraphs.append(
+                f"Больше всего интереса аудитории собирают темы {self._join_list([item['theme'] for item in theme_slice])}."
+            )
+            paragraphs.append(f"Метрики ключевых тем: {self._format_ranked_themes(theme_slice, min(requested_count, 5))}.")
+
+        elif primary_mode == "theme_popularity" and theme_items:
+            theme_slice = theme_items[: min(len(theme_items), requested_count)]
+            paragraphs.append(
+                f"Самыми популярными темами в текущем срезе выглядят {self._join_list([item['theme'] for item in theme_slice])}."
+            )
+            paragraphs.append(f"Метрики этих тем: {self._format_ranked_themes(theme_slice, min(requested_count, 5))}.")
+
+        elif primary_mode == "theme_underperformance" and theme_items:
+            theme_slice = theme_items[: min(len(theme_items), requested_count)]
+            paragraphs.append(
+                f"Слабее всего по метрикам выглядят темы {self._join_list([item['theme'] for item in theme_slice])}."
+            )
+            paragraphs.append(f"Метрики слабых тем: {self._format_ranked_themes(theme_slice, min(requested_count, 5))}.")
+
+        else:
+            if single_post:
+                paragraphs.append(
+                    f"В центре запроса один пост — «{single_post['post_text']}». По нему видно {self._format_post_metrics(single_post, priority='comments' if analyzed_comments > 0 else 'success')}."
+                )
+                if analyzed_comments > 0:
+                    dominant = "negative" if int(single_post.get("negative_relevant_comments_count", 0) or 0) > int(single_post.get("positive_relevant_comments_count", 0) or 0) else "positive"
+                    reason = self._build_post_reason_snippet(single_post, dominant).strip()
+                    if reason:
+                        paragraphs.append(f"Что люди думают об этой публикации: {reason}")
+            elif focus_evidence:
+                lead_focus = focus_evidence[0]["post"]
+                paragraphs.append(
+                    f"Ближе всего к текущему запросу относится публикация «{lead_focus['post_text']}». По ней видно {self._format_post_metrics(lead_focus, priority='success')}."
+                )
+            elif declared_theme:
+                paragraphs.append(f"Фокус анализа задан темой «{declared_theme}».")
+            elif derived_post_themes:
+                paragraphs.append(f"В текущем срезе заметнее всего сюжеты о {self._join_list(derived_post_themes[:4])}.")
+
+        if primary_mode in {"topic_report", "post_sentiment", "theme_sentiment"} and analyzed_comments > 0:
+            paragraphs.append(
+                f"По релевантным комментариям видно следующее распределение тональности: позитив {sentiment.get('positive_percent', 0)}%, негатив {sentiment.get('negative_percent', 0)}%, нейтрально {sentiment.get('neutral_percent', 0)}%."
+            )
+        elif primary_mode in {"topic_report", "post_sentiment", "theme_sentiment"} and total_posts > 0 and analyzed_comments <= 0:
+            paragraphs.append("Релевантных комментариев мало, поэтому вывод опирается прежде всего на метрики самих постов.")
+
+        if confidence.get("level") == "low":
+            paragraphs.append(
+                f"Вывод стоит считать предварительным: в анализ попали {total_posts} постов и {analyzed_comments} релевантных комментариев."
+            )
+
+        if not paragraphs:
+            prompt = (prompt_text or "").strip() or "текущему запросу"
+            return f"По запросу «{prompt}» пока не хватает устойчивых сигналов для точного ответа."
         return "\n\n".join(paragraphs).strip()
 
     def _join_list(self, items: list[str]) -> str:

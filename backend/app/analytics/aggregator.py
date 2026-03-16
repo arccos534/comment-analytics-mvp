@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections import Counter, defaultdict
 from math import ceil
 
-from app.analytics.prompt_intent import extract_requested_percentage, infer_prompt_mode
+from app.analytics.prompt_intent import extract_requested_count, extract_requested_percentage, infer_prompt_mode
 
 
 class ReportAggregator:
@@ -19,6 +19,7 @@ class ReportAggregator:
         working_set = relevant_comments
         scoped_posts = scoped_posts or []
         prompt_modes = set(infer_prompt_mode(run.prompt_text))
+        requested_item_count = extract_requested_count(run.prompt_text)
         requested_success_bucket_percent = (
             extract_requested_percentage(run.prompt_text)
             if {"successful_posts_bucket", "underperforming_posts_bucket"} & prompt_modes
@@ -45,6 +46,9 @@ class ReportAggregator:
                 "likes_count": 0,
                 "reposts_count": 0,
                 "views_count": 0,
+                "positive_comment_candidates": [],
+                "negative_comment_candidates": [],
+                "neutral_comment_candidates": [],
             }
         )
 
@@ -64,6 +68,15 @@ class ReportAggregator:
             sentiment = item["sentiment"]
             if sentiment in {"positive", "negative", "neutral"}:
                 bucket[f"{sentiment}_relevant_comments_count"] += 1
+                bucket[f"{sentiment}_comment_candidates"].append(
+                    {
+                        "comment_id": str(item["comment"].id),
+                        "text": item["comment"].text,
+                        "sentiment": sentiment,
+                        "relevance_score": item["relevance_score"],
+                        "post_url": item["post"].post_url,
+                    }
+                )
             bucket["platform_comments_count"] = max(bucket["platform_comments_count"], getattr(post, "comments_count", 0))
             bucket["likes_count"] = getattr(post, "likes_count", 0)
             bucket["reposts_count"] = getattr(post, "reposts_count", 0)
@@ -89,6 +102,7 @@ class ReportAggregator:
         total_comments = len(working_set)
         total_posts = len(post_scores)
         total_comments_base = max(total_comments, 1)
+        ranking_limit = max(5, requested_item_count or 0)
 
         topics = [
             {"name": name, "count": count, "share": round(count / total_comments_base, 2)}
@@ -170,6 +184,9 @@ class ReportAggregator:
                 "positive_relevant_comments_count": value["positive_relevant_comments_count"],
                 "negative_relevant_comments_count": value["negative_relevant_comments_count"],
                 "neutral_relevant_comments_count": value["neutral_relevant_comments_count"],
+                "positive_comment_examples": self._pick_candidate_examples(value["positive_comment_candidates"]),
+                "negative_comment_examples": self._pick_candidate_examples(value["negative_comment_candidates"]),
+                "neutral_comment_examples": self._pick_candidate_examples(value["neutral_comment_candidates"]),
                 "likes_count": value["likes_count"],
                 "reposts_count": value["reposts_count"],
             }
@@ -275,12 +292,12 @@ class ReportAggregator:
             ),
             reverse=True,
         )
-        popular_posts = sorted(post_items, key=popularity_key, reverse=True)[:5]
-        unpopular_posts = sorted(post_items, key=popularity_key)[:5]
-        reacted_posts = sorted(post_items, key=reaction_key, reverse=True)[:5]
-        unreacted_posts = sorted(post_items, key=reaction_key)[:5]
-        discussed_posts = sorted(post_items, key=discussion_key, reverse=True)[:5]
-        bottom_discussed_posts = sorted(post_items, key=discussion_key)[:5]
+        popular_posts = sorted(post_items, key=popularity_key, reverse=True)[:ranking_limit]
+        unpopular_posts = sorted(post_items, key=popularity_key)[:ranking_limit]
+        reacted_posts = sorted(post_items, key=reaction_key, reverse=True)[:ranking_limit]
+        unreacted_posts = sorted(post_items, key=reaction_key)[:ranking_limit]
+        discussed_posts = sorted(post_items, key=discussion_key, reverse=True)[:ranking_limit]
+        bottom_discussed_posts = sorted(post_items, key=discussion_key)[:ranking_limit]
 
         success_bucket_share = (requested_success_bucket_percent or 20) / 100
         top_bucket_count = max(1, ceil(len(post_items) * success_bucket_share)) if post_items else 0
@@ -297,6 +314,7 @@ class ReportAggregator:
                 "period_to": run.period_to.isoformat() if run.period_to else None,
                 "platforms": filters.get("platforms", []),
                 "source_ids": filters.get("source_ids", []),
+                "requested_item_count": requested_item_count,
                 "requested_success_bucket_percent": requested_success_bucket_percent,
                 "analysis_mode_override": (run.filters_json or {}).get("analysis_mode_override"),
             },
@@ -358,5 +376,27 @@ class ReportAggregator:
                 }
             )
             if len(examples) == 3:
+                break
+        return examples
+
+    def _pick_candidate_examples(self, items: list[dict], limit: int = 3) -> list[dict]:
+        subset = sorted(items, key=lambda item: item.get("relevance_score", 0), reverse=True)
+        seen: set[str] = set()
+        examples: list[dict] = []
+        for item in subset:
+            fingerprint = (item.get("text") or "").strip().lower()
+            if not fingerprint or fingerprint in seen:
+                continue
+            seen.add(fingerprint)
+            examples.append(
+                {
+                    "comment_id": item.get("comment_id"),
+                    "text": item.get("text") or "",
+                    "sentiment": item.get("sentiment"),
+                    "relevance_score": item.get("relevance_score"),
+                    "post_url": item.get("post_url"),
+                }
+            )
+            if len(examples) >= limit:
                 break
         return examples

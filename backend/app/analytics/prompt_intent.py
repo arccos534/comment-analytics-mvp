@@ -267,6 +267,28 @@ def extract_requested_percentage(prompt_text: str | None) -> int | None:
     return None
 
 
+def extract_requested_count(prompt_text: str | None) -> int | None:
+    prompt = normalize_prompt_text(prompt_text)
+    if not prompt:
+        return None
+
+    patterns = [
+        r"(?:топ|top)\s*(\d{1,2})",
+        r"выдел(?:и|ить)?[^0-9]{0,24}(\d{1,2})",
+        r"покажи[^0-9]{0,24}(\d{1,2})",
+        r"найди[^0-9]{0,24}(\d{1,2})",
+        r"(\d{1,2})\s*(?:сам\w+\s+)?(?:пост\w*|тем\w*|сюжет\w*|источник\w*|канал\w*)",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, prompt)
+        if not match:
+            continue
+        value = int(match.group(1))
+        if 0 < value <= 50:
+            return value
+    return None
+
+
 def infer_prompt_mode(prompt_text: str | None) -> list[str]:
     prompt = normalize_prompt_text(prompt_text)
     if not prompt:
