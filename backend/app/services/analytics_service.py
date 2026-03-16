@@ -7,7 +7,7 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 
 from app.analytics.aggregator import ReportAggregator
-from app.analytics.keywords import KeywordExtractor
+from app.analytics.llm_comment_analyzer import LLMCommentAnalyzer
 from app.analytics.prompt_intent import (
     GENERIC_PROMPT_SCOPE_TERMS as SHARED_GENERIC_PROMPT_SCOPE_TERMS,
     apply_analysis_mode_override as apply_shared_analysis_mode_override,
@@ -16,10 +16,9 @@ from app.analytics.prompt_intent import (
 )
 from app.analytics.relevance import RelevanceScorer
 from app.analytics.sentiment import SentimentAnalyzer
-from app.analytics.topics import TopicGrouper
 from app.core.config import get_settings
 from app.models.analysis_run import AnalysisRun
-from app.models.enums import AnalysisRunStatusEnum
+from app.models.enums import AnalysisRunStatusEnum, SentimentEnum
 from app.repositories.analysis_repository import AnalysisRepository
 from app.repositories.comment_repository import CommentRepository
 from app.repositories.post_repository import PostRepository
@@ -211,9 +210,8 @@ class AnalyticsService:
         self.comments = CommentRepository(db)
         self.posts = PostRepository(db)
         self.analysis_repo = AnalysisRepository(db)
+        self.comment_llm = LLMCommentAnalyzer()
         self.sentiment = SentimentAnalyzer()
-        self.keywords = KeywordExtractor()
-        self.topics = TopicGrouper()
         self.relevance = RelevanceScorer()
         self.aggregator = ReportAggregator()
         self.report_service = ReportService()
@@ -525,10 +523,8 @@ class AnalyticsService:
                 if record[1].id in scoped_post_ids and not self._is_advertising_post(record[1].post_text)
             ]
 
-            enriched_comments: list[dict] = []
+            comment_analysis_inputs: list[dict] = []
             for comment, post, source in scoped_records:
-                extracted_keywords = self.keywords.extract(comment.text)
-                topics = self.topics.group(extracted_keywords, comment.text)
                 relevance_score = self.relevance.score_comment_prompt(
                     text=comment.text,
                     prompt_text=run.prompt_text,
@@ -537,11 +533,45 @@ class AnalyticsService:
                     # Comments under a prompt-relevant post are part of the audience
                     # reaction even if the comment text does not repeat the prompt terms.
                     relevance_score = max(relevance_score, 0.2)
-                sentiment_result = self.sentiment.analyze(comment.text)
+                comment_analysis_inputs.append(
+                    {
+                        "comment": comment,
+                        "post": post,
+                        "source": source,
+                        "comment_text": comment.text,
+                        "post_text": post.post_text or "",
+                        "relevance_score": relevance_score,
+                    }
+                )
+
+            llm_comment_results = self.comment_llm.analyze_many(
+                [
+                    {
+                        "comment_text": item["comment_text"],
+                        "post_text": item["post_text"],
+                    }
+                    for item in comment_analysis_inputs
+                ]
+            )
+
+            enriched_comments: list[dict] = []
+            for item, analysis in zip(comment_analysis_inputs, llm_comment_results):
+                comment = item["comment"]
+                post = item["post"]
+                source = item["source"]
+                relevance_score = item["relevance_score"]
+                sentiment_value = analysis["sentiment"]
+                try:
+                    sentiment_enum = SentimentEnum(sentiment_value)
+                except ValueError:
+                    sentiment_enum = self.sentiment.analyze(comment.text)["sentiment"]
+                    sentiment_value = sentiment_enum.value
+                topics = analysis["topics"]
+                extracted_keywords = analysis["keywords"]
                 self.analysis_repo.upsert_comment_analysis(
                     comment_id=comment.id,
-                    sentiment=sentiment_result["sentiment"],
-                    sentiment_score=sentiment_result["score"],
+                    sentiment=sentiment_enum,
+                    sentiment_score=analysis["score"],
                     topics_json=topics,
                     keywords_json=extracted_keywords,
                     relevance_score=relevance_score,
@@ -552,8 +582,8 @@ class AnalyticsService:
                         "comment": comment,
                         "post": post,
                         "source": source,
-                        "sentiment": sentiment_result["sentiment"].value,
-                        "sentiment_score": sentiment_result["score"],
+                        "sentiment": sentiment_value,
+                        "sentiment_score": analysis["score"],
                         "topics": topics,
                         "keywords": extracted_keywords,
                         "relevance_score": relevance_score,

@@ -3790,3 +3790,72 @@ class SummaryGenerator:
         if len(compact) <= limit:
             return compact
         return compact[: limit - 3].rstrip() + "..."
+
+    def _extract_signal_topics_from_examples(self, examples: list[dict], limit: int = 4) -> list[str]:
+        counter: Counter[str] = Counter()
+        for example in examples:
+            for topic in example.get("topics", []) or []:
+                cleaned_topic = (topic or "").strip()
+                if cleaned_topic:
+                    counter[cleaned_topic] += 3
+            for keyword in example.get("keywords", []) or []:
+                cleaned_keyword = (keyword or "").strip()
+                if cleaned_keyword:
+                    counter[cleaned_keyword] += 2
+
+            text = self._normalize_text(example.get("text") or "")
+            tokens = [
+                token
+                for token in re.findall(r"[a-zР°-СЏ0-9-]{4,}", text)
+                if token not in POST_THEME_STOPWORDS and token not in THEME_NOISE_TOKENS
+            ]
+            phrases: set[str] = set()
+            for size in (3, 2):
+                for index in range(0, max(len(tokens) - size + 1, 0)):
+                    phrase = " ".join(tokens[index:index + size]).strip()
+                    if len(phrase) >= 8:
+                        phrases.add(phrase)
+            if not phrases:
+                phrases.update(token for token in tokens if len(token) >= 5)
+            for phrase in phrases:
+                counter[phrase] += 1
+
+        ordered: list[str] = []
+        for phrase, _ in counter.most_common(limit * 3):
+            title = self._titleize_phrase(phrase)
+            if title and title not in ordered:
+                ordered.append(title)
+            if len(ordered) >= limit:
+                break
+        return ordered
+
+    def _build_reason_labels_from_examples(self, examples: list[dict], sentiment: str | None, limit: int = 3) -> list[str]:
+        if sentiment not in {"positive", "negative"}:
+            return []
+
+        counter: Counter[str] = Counter()
+        for example in examples:
+            for topic in example.get("topics", []) or []:
+                cleaned_topic = (topic or "").strip()
+                if cleaned_topic and len(cleaned_topic.split()) >= 2:
+                    counter[cleaned_topic] += 3
+            for keyword in example.get("keywords", []) or []:
+                cleaned_keyword = (keyword or "").strip()
+                if cleaned_keyword and len(cleaned_keyword.split()) >= 2:
+                    counter[cleaned_keyword] += 2
+
+        if counter:
+            return [label for label, _ in counter.most_common(limit)]
+
+        hint_map = POSITIVE_REASON_HINTS if sentiment == "positive" else NEGATIVE_REASON_HINTS
+        for example in examples:
+            normalized = self._normalize_text(example.get("text") or "")
+            for token, label in hint_map.items():
+                if token in normalized:
+                    counter[label] += 1
+
+        if counter:
+            return [label for label, _ in counter.most_common(limit)]
+
+        raw_topics = self._extract_signal_topics_from_examples(examples, limit=limit)
+        return [topic for topic in raw_topics if len(topic.split()) >= 2][:limit]

@@ -113,6 +113,8 @@ class ReportAggregator:
                         "text": item["comment"].text,
                         "sentiment": sentiment,
                         "sentiment_score": item.get("sentiment_score"),
+                        "topics": item.get("topics", []),
+                        "keywords": item.get("keywords", []),
                         "relevance_score": item["relevance_score"],
                         "post_url": item["post"].post_url,
                     }
@@ -411,6 +413,9 @@ class ReportAggregator:
                     "comment_id": str(item["comment"].id),
                     "text": item["comment"].text,
                     "sentiment": item["sentiment"],
+                    "sentiment_score": item.get("sentiment_score"),
+                    "topics": item.get("topics", []),
+                    "keywords": item.get("keywords", []),
                     "relevance_score": item["relevance_score"],
                     "post_url": item["post"].post_url,
                 }
@@ -445,6 +450,8 @@ class ReportAggregator:
                     "text": item.get("text") or "",
                     "sentiment": item.get("sentiment"),
                     "sentiment_score": item.get("sentiment_score"),
+                    "topics": item.get("topics", []),
+                    "keywords": item.get("keywords", []),
                     "relevance_score": item.get("relevance_score"),
                     "post_url": item.get("post_url"),
                 }

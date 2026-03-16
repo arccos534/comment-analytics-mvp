@@ -46,6 +46,9 @@ class Settings(BaseSettings):
     llm_summary_min_comments: int = 8
     llm_summary_max_topics: int = 5
     llm_summary_max_examples_per_bucket: int = 1
+    llm_comment_analysis_enabled: bool = True
+    llm_comment_analysis_batch_size: int = 10
+    llm_comment_analysis_cache_ttl_seconds: int = 2592000
 
     cors_origins: list[str] = Field(
         default_factory=lambda: [
