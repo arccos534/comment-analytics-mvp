@@ -180,6 +180,30 @@ function getTakeawayLinks(report: ReportSnapshot["report_json"], mode: AnalysisM
     }
   }
 
+  if (mode === "post_popularity") {
+    if (promptModes.has("most_reacted_post")) {
+      pushUniqueLink("Source post", report.posts.top_reacted);
+    } else if (promptModes.has("most_viewed_post")) {
+      const posts = [...(report.posts.top_popular || [])].sort(
+        (left, right) => Number(right.views_count || 0) - Number(left.views_count || 0)
+      );
+      pushUniqueLink("Source post", posts);
+    } else if (promptModes.has("most_discussed_news")) {
+      pushUniqueLink("Source post", report.posts.top_discussed);
+    }
+  }
+
+  if (mode === "post_underperformance") {
+    if (promptModes.has("least_reacted_post")) {
+      pushUniqueLink("Source post", report.posts.top_unreacted);
+    } else if (promptModes.has("least_viewed_post")) {
+      const posts = [...(report.posts.top_unpopular || [])].sort(
+        (left, right) => Number(left.views_count || 0) - Number(right.views_count || 0)
+      );
+      pushUniqueLink("Source post", posts);
+    }
+  }
+
   return links.length === 1 ? [{ ...links[0], label: "Source post" }] : links;
 }
 

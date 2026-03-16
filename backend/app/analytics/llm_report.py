@@ -497,7 +497,7 @@ class SummaryGenerator:
                 )
                 return bundle
             if content:
-                return {"overview": content, "takeaways": []}
+                return {"overview": self._clean_summary_text(content), "takeaways": []}
         except Exception:
             logger.exception("LLM summary generation failed")
 
@@ -557,6 +557,7 @@ class SummaryGenerator:
             "- For topic_report: produce a focused thematic report aligned with the user's request.\n"
             "- If analysis_request.theme_of_posts is set, rely only on theme-scoped evidence and do not mix in unrelated topics.\n"
             "- For Telegram, likes_count means reactions; for VK, likes_count means likes.\n"
+            "- Do not output raw URLs inside overview or takeaways. If a post link exists, the interface will render a separate Source post button.\n"
             "- Do not invent facts. Do not create themes from broken word fragments. Theme labels must read like short editorial headings.\n"
             "- If confidence_assessment.level is low, explicitly frame the result as preliminary and cautious.\n"
             "- If the request is about post popularity or underperformance, use top_success_posts, bottom_success_posts, top_reacted_posts, top_viewed_posts, top_positive_posts, top_negative_posts, and style_gap where relevant.\n"
@@ -582,7 +583,7 @@ class SummaryGenerator:
         except json.JSONDecodeError:
             return None
 
-        overview = (payload.get("overview") or "").strip()
+        overview = self._clean_summary_text((payload.get("overview") or "").strip())
         if not overview:
             return None
 
@@ -590,7 +591,7 @@ class SummaryGenerator:
         for item in payload.get("takeaways", []) or []:
             if not isinstance(item, str):
                 continue
-            normalized = item.strip()
+            normalized = self._clean_summary_text(item.strip())
             if normalized and normalized not in takeaways:
                 takeaways.append(normalized)
 
@@ -599,6 +600,14 @@ class SummaryGenerator:
             "takeaways": takeaways[:3],
             "analysis_mode": str(payload.get("analysis_mode") or "").strip() or "topic_report",
         }
+
+    def _clean_summary_text(self, text: str) -> str:
+        if not text:
+            return ""
+        cleaned = re.sub(r"(?im)^\s*(?:ссылка на пост|source post|post url)\s*:\s*https?://\S+\s*$", "", text)
+        cleaned = re.sub(r"(?im)^\s*https?://\S+\s*$", "", cleaned)
+        cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+        return cleaned.strip()
 
     def _build_system_prompt(self) -> str:
         return (
@@ -655,6 +664,9 @@ class SummaryGenerator:
         matched_posts = (posts.get("matched", []) or [])[:8]
         top_popular = (posts.get("top_popular", []) or [])[:5]
         top_unpopular = (posts.get("top_unpopular", []) or [])[:5]
+        report_top_reacted = (posts.get("top_reacted", []) or [])[:5]
+        report_top_unreacted = (posts.get("top_unreacted", []) or [])[:5]
+        report_top_discussed = (posts.get("top_discussed", []) or [])[:5]
         success_top_bucket = (posts.get("success_top_bucket", []) or [])[:8]
         success_bottom_bucket = (posts.get("success_bottom_bucket", []) or [])[:8]
         source_comparison = (report_json.get("sources", {}).get("comparison", []) or [])[:8]
@@ -667,55 +679,107 @@ class SummaryGenerator:
             declared_theme,
         )
         theme_basis_posts = theme_scoped_posts if declared_theme else (matched_posts + top_popular + top_unpopular)
-        top_discussed = sorted(
-            theme_scoped_posts if declared_theme else (theme_scoped_posts or matched_posts),
-            key=lambda post: (
-                int(post.get("comments_count", 0) or 0),
-                int(post.get("likes_count", 0) or 0),
-                int(post.get("views_count", 0) or 0),
-                int(post.get("reposts_count", 0) or 0),
-            ),
-            reverse=True,
-        )[:5]
+        if declared_theme:
+            top_discussed = sorted(
+                theme_scoped_posts,
+                key=lambda post: (
+                    int(post.get("comments_count", 0) or 0),
+                    int(post.get("likes_count", 0) or 0),
+                    int(post.get("views_count", 0) or 0),
+                    int(post.get("reposts_count", 0) or 0),
+                ),
+                reverse=True,
+            )[:5]
+        else:
+            top_discussed = report_top_discussed or sorted(
+                matched_posts,
+                key=lambda post: (
+                    int(post.get("comments_count", 0) or 0),
+                    int(post.get("likes_count", 0) or 0),
+                    int(post.get("views_count", 0) or 0),
+                    int(post.get("reposts_count", 0) or 0),
+                ),
+                reverse=True,
+            )[:5]
         ranking_posts = theme_basis_posts or matched_posts or top_popular or top_unpopular
-        top_reacted = sorted(
-            ranking_posts,
-            key=lambda post: (
-                post.get("likes_count", 0),
-                post.get("views_count", 0),
-                post.get("comments_count", 0),
-                post.get("reposts_count", 0),
-            ),
-            reverse=True,
-        )[:5]
-        least_reacted = sorted(
-            ranking_posts,
-            key=lambda post: (
-                post.get("likes_count", 0),
-                post.get("views_count", 0),
-                post.get("comments_count", 0),
-                post.get("reposts_count", 0),
-            ),
-        )[:5]
-        top_viewed = sorted(
-            ranking_posts,
-            key=lambda post: (
-                post.get("views_count", 0),
-                post.get("likes_count", 0),
-                post.get("comments_count", 0),
-                post.get("reposts_count", 0),
-            ),
-            reverse=True,
-        )[:5]
-        least_viewed = sorted(
-            ranking_posts,
-            key=lambda post: (
-                post.get("views_count", 0),
-                post.get("likes_count", 0),
-                post.get("comments_count", 0),
-                post.get("reposts_count", 0),
-            ),
-        )[:5]
+        if declared_theme:
+            top_reacted = sorted(
+                ranking_posts,
+                key=lambda post: (
+                    post.get("likes_count", 0),
+                    post.get("views_count", 0),
+                    post.get("comments_count", 0),
+                    post.get("reposts_count", 0),
+                ),
+                reverse=True,
+            )[:5]
+            least_reacted = sorted(
+                ranking_posts,
+                key=lambda post: (
+                    post.get("likes_count", 0),
+                    post.get("views_count", 0),
+                    post.get("comments_count", 0),
+                    post.get("reposts_count", 0),
+                ),
+            )[:5]
+            top_viewed = sorted(
+                ranking_posts,
+                key=lambda post: (
+                    post.get("views_count", 0),
+                    post.get("likes_count", 0),
+                    post.get("comments_count", 0),
+                    post.get("reposts_count", 0),
+                ),
+                reverse=True,
+            )[:5]
+            least_viewed = sorted(
+                ranking_posts,
+                key=lambda post: (
+                    post.get("views_count", 0),
+                    post.get("likes_count", 0),
+                    post.get("comments_count", 0),
+                    post.get("reposts_count", 0),
+                ),
+            )[:5]
+        else:
+            top_reacted = report_top_reacted or sorted(
+                ranking_posts,
+                key=lambda post: (
+                    post.get("likes_count", 0),
+                    post.get("views_count", 0),
+                    post.get("comments_count", 0),
+                    post.get("reposts_count", 0),
+                ),
+                reverse=True,
+            )[:5]
+            least_reacted = report_top_unreacted or sorted(
+                ranking_posts,
+                key=lambda post: (
+                    post.get("likes_count", 0),
+                    post.get("views_count", 0),
+                    post.get("comments_count", 0),
+                    post.get("reposts_count", 0),
+                ),
+            )[:5]
+            top_viewed = sorted(
+                top_popular or ranking_posts,
+                key=lambda post: (
+                    post.get("views_count", 0),
+                    post.get("likes_count", 0),
+                    post.get("comments_count", 0),
+                    post.get("reposts_count", 0),
+                ),
+                reverse=True,
+            )[:5]
+            least_viewed = sorted(
+                top_unpopular or ranking_posts,
+                key=lambda post: (
+                    post.get("views_count", 0),
+                    post.get("likes_count", 0),
+                    post.get("comments_count", 0),
+                    post.get("reposts_count", 0),
+                ),
+            )[:5]
         max_examples = max(self.settings.llm_summary_max_examples_per_bucket, 2)
 
         meaningful_topics = [
