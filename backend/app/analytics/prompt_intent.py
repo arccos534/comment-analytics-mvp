@@ -234,6 +234,25 @@ def extract_prompt_scope_terms(prompt_text: str | None) -> list[str]:
     return [_titleize_phrase(item) for item in ordered[:12]]
 
 
+def extract_requested_percentage(prompt_text: str | None) -> int | None:
+    prompt = normalize_prompt_text(prompt_text)
+    if not prompt:
+        return None
+
+    patterns = [
+        r"(\d{1,3})\s*%",
+        r"(\d{1,3})\s*процент(?:а|ов)?",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, prompt)
+        if not match:
+            continue
+        value = int(match.group(1))
+        if 0 < value <= 100:
+            return value
+    return None
+
+
 def infer_prompt_mode(prompt_text: str | None) -> list[str]:
     prompt = normalize_prompt_text(prompt_text)
     if not prompt:
@@ -243,6 +262,14 @@ def infer_prompt_mode(prompt_text: str | None) -> list[str]:
     for pattern, mode in RAW_MODE_PATTERNS:
         if re.search(pattern, prompt):
             modes.append(mode)
+
+    has_post_reference = any(token in prompt for token in ("пост", "публикац", "новост"))
+    has_percent_reference = "%" in prompt or "процент" in prompt
+    if has_post_reference and has_percent_reference:
+        if any(token in prompt for token in ("успеш", "популяр", "сильн", "наиболее")):
+            modes.append("successful_posts_bucket")
+        if any(token in prompt for token in ("неуспеш", "непопуляр", "слаб", "худш", "наименее")):
+            modes.append("underperforming_posts_bucket")
 
     if not modes:
         modes.append("general_analysis")

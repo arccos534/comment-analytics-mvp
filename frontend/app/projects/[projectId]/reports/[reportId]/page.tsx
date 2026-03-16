@@ -76,6 +76,11 @@ function getThemeSuccessScore(item: ThemeReactionItem): number {
   );
 }
 
+function getSuccessBucketPercent(report: ReportSnapshot["report_json"]): number {
+  const raw = Number(report.meta.requested_success_bucket_percent || 0);
+  return Number.isFinite(raw) && raw > 0 ? raw : 20;
+}
+
 function getThemeCardConfig(report: ReportSnapshot["report_json"], mode: AnalysisMode): ThemeCardConfig {
   const baseItems = [...(report.summary.theme_reaction_map || [])];
   const requestedCount = getRequestedCount(report.meta.prompt_text);
@@ -204,6 +209,17 @@ function getTakeawayLinks(report: ReportSnapshot["report_json"], mode: AnalysisM
     }
   }
 
+  if (mode === "mixed") {
+    const showTopBucket = promptModes.has("successful_posts_bucket");
+    const showBottomBucket = promptModes.has("underperforming_posts_bucket");
+    if (showTopBucket) {
+      pushUniqueLink(showBottomBucket ? "Top post" : "Source post", report.posts.success_top_bucket);
+    }
+    if (showBottomBucket) {
+      pushUniqueLink(showTopBucket ? "Bottom post" : "Source post", report.posts.success_bottom_bucket);
+    }
+  }
+
   return links.length === 1 ? [{ ...links[0], label: "Source post" }] : links;
 }
 
@@ -212,6 +228,8 @@ function getPostSections(report: ReportSnapshot["report_json"], mode: AnalysisMo
   const promptModes = new Set(report.summary.prompt_modes || []);
   const showSuccessTopBucket = promptModes.has("successful_posts_bucket");
   const showSuccessBottomBucket = promptModes.has("underperforming_posts_bucket");
+  const successBucketPercent = getSuccessBucketPercent(report);
+  const successBucketLabel = `${successBucketPercent}%`;
   const topPositivePosts = report.summary.top_positive_posts || [];
   const topNegativePosts = report.summary.top_negative_posts || [];
 
@@ -229,7 +247,7 @@ function getPostSections(report: ReportSnapshot["report_json"], mode: AnalysisMo
       },
       {
         title: "Лидеры по успешности",
-        description: "Верхние N% по просмотрам, реакциям и комментариям, только если это прямо запрошено в промте.",
+        description: `Верхние ${successBucketLabel} по просмотрам, реакциям и комментариям, только если это прямо запрошено в промте.`,
         posts: showSuccessTopBucket ? postGroups.success_top_bucket || [] : [],
       },
     ];
@@ -250,8 +268,8 @@ function getPostSections(report: ReportSnapshot["report_json"], mode: AnalysisMo
         ),
       },
       {
-        title: "Верхние N% по успешности",
-        description: "Секция появляется только когда пользователь явно просит выделить процент лидеров.",
+        title: `Верхние ${successBucketLabel} по успешности`,
+        description: `Секция появляется только когда пользователь явно просит выделить верхние ${successBucketLabel} постов.`,
         posts: showSuccessTopBucket ? postGroups.success_top_bucket || [] : [],
       },
     ];
@@ -270,9 +288,36 @@ function getPostSections(report: ReportSnapshot["report_json"], mode: AnalysisMo
         posts: postGroups.top_undiscussed || [],
       },
       {
-        title: "Нижние N% по успешности",
-        description: "Секция появляется только когда пользователь явно просит выделить процент слабых постов.",
+        title: `Нижние ${successBucketLabel} по успешности`,
+        description: `Секция появляется только когда пользователь явно просит выделить нижние ${successBucketLabel} постов.`,
         posts: showSuccessBottomBucket ? postGroups.success_bottom_bucket || [] : [],
+      },
+    ];
+  }
+
+  if (mode === "mixed" && (showSuccessTopBucket || showSuccessBottomBucket)) {
+    return [
+      {
+        title: `Верхние ${successBucketLabel} по успешности`,
+        description: "Посты с лучшими сочетаниями просмотров, лайков или реакций и вторичных метрик.",
+        posts: showSuccessTopBucket ? postGroups.success_top_bucket || [] : [],
+      },
+      {
+        title: `Нижние ${successBucketLabel} по успешности`,
+        description: "Посты с наименее успешными сочетаниями просмотров, лайков или реакций в текущем срезе.",
+        posts: showSuccessBottomBucket ? postGroups.success_bottom_bucket || [] : [],
+      },
+      {
+        title: "Лидеры по реакциям",
+        description: "Посты с наибольшим числом лайков или реакций внутри выбранного среза.",
+        posts: postGroups.top_reacted || [],
+      },
+      {
+        title: "Лидеры по просмотрам",
+        description: "Посты с наибольшим охватом для сравнения с успешными и слабыми bucket'ами.",
+        posts: [...(postGroups.top_popular || [])].sort(
+          (left, right) => Number(right.views_count || 0) - Number(left.views_count || 0)
+        ),
       },
     ];
   }

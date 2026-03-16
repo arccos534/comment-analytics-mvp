@@ -3,6 +3,8 @@ from __future__ import annotations
 from collections import Counter, defaultdict
 from math import ceil
 
+from app.analytics.prompt_intent import extract_requested_percentage, infer_prompt_mode
+
 
 class ReportAggregator:
     def build_report(
@@ -16,6 +18,12 @@ class ReportAggregator:
         relevant_comments = [item for item in enriched_comments if item["relevance_score"] >= 0.05]
         working_set = relevant_comments
         scoped_posts = scoped_posts or []
+        prompt_modes = set(infer_prompt_mode(run.prompt_text))
+        requested_success_bucket_percent = (
+            extract_requested_percentage(run.prompt_text)
+            if {"successful_posts_bucket", "underperforming_posts_bucket"} & prompt_modes
+            else None
+        )
 
         sentiment_counter = Counter(item["sentiment"] for item in working_set)
         topic_counter = Counter(topic for item in working_set for topic in item["topics"])
@@ -274,7 +282,8 @@ class ReportAggregator:
         discussed_posts = sorted(post_items, key=discussion_key, reverse=True)[:5]
         bottom_discussed_posts = sorted(post_items, key=discussion_key)[:5]
 
-        top_bucket_count = max(1, ceil(len(post_items) * 0.2)) if post_items else 0
+        success_bucket_share = (requested_success_bucket_percent or 20) / 100
+        top_bucket_count = max(1, ceil(len(post_items) * success_bucket_share)) if post_items else 0
         success_leaders = sorted(post_items, key=popularity_key, reverse=True)[:top_bucket_count]
         success_trailers = sorted(post_items, key=popularity_key)[:top_bucket_count]
 
@@ -288,6 +297,7 @@ class ReportAggregator:
                 "period_to": run.period_to.isoformat() if run.period_to else None,
                 "platforms": filters.get("platforms", []),
                 "source_ids": filters.get("source_ids", []),
+                "requested_success_bucket_percent": requested_success_bucket_percent,
             },
             "stats": {
                 "total_posts": total_posts,

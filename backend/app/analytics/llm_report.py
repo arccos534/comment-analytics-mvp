@@ -555,6 +555,7 @@ class SummaryGenerator:
             "- For theme_popularity: rank themes by post-level metrics first (views, likes_or_reactions, comments, reposts) and explain what makes those themes stronger.\n"
             "- For theme_underperformance: name the weakest themes by post-level metrics and explain what makes them weaker.\n"
             "- For topic_report: produce a focused thematic report aligned with the user's request.\n"
+            "- If the request explicitly asks for both strongest and weakest post buckets (for example top and bottom N percent), cover both sides in overview and takeaways instead of focusing on leaders only.\n"
             "- If analysis_request.theme_of_posts is set, rely only on theme-scoped evidence and do not mix in unrelated topics.\n"
             "- For Telegram, likes_count means reactions; for VK, likes_count means likes.\n"
             "- Do not output raw URLs inside overview or takeaways. If a post link exists, the interface will render a separate Source post button.\n"
@@ -839,6 +840,7 @@ class SummaryGenerator:
                 "request_contract": prompt_intent.request_contract,
                 "answer_strategy": prompt_intent.answer_strategy,
                 "prompt_focus_terms": prompt_focus_terms,
+                "success_bucket_percent": report_json.get("meta", {}).get("requested_success_bucket_percent"),
                 "period_from": report_json.get("meta", {}).get("period_from"),
                 "period_to": report_json.get("meta", {}).get("period_to"),
                 "platforms": report_json.get("meta", {}).get("platforms", []),
@@ -2230,6 +2232,8 @@ class SummaryGenerator:
         prompt_modes = set(request.get("prompt_mode", []) or [])
         primary_mode = request.get("primary_mode") or "topic_report"
         prompt_focus_terms = request.get("prompt_focus_terms", []) or []
+        success_bucket_percent = int(request.get("success_bucket_percent") or 20)
+        success_bucket_label = f"{success_bucket_percent}%"
 
         matched_posts = payload.get("matched_posts", []) or []
         focus_evidence = payload.get("focus_evidence", []) or []
@@ -2298,6 +2302,8 @@ class SummaryGenerator:
             return list(dict.fromkeys(takeaways))[:3]
 
         if focus_evidence and primary_mode in {"topic_report", "mixed", "theme_interest", "theme_sentiment"} and not (
+            primary_mode == "mixed" and wants_success_buckets
+        ) and not (
             primary_mode == "theme_sentiment" and wants_theme_polarity
         ):
             lead = focus_evidence[0]
@@ -2309,7 +2315,18 @@ class SummaryGenerator:
                     f"Ближе всего к запросу относится сюжет «{post_text}» — он напрямую связан с темами: {matched_terms}."
                 )
 
-        if primary_mode == "post_sentiment":
+        if primary_mode == "mixed" and wants_success_buckets:
+            if top_success_posts:
+                leader_post = sorted(top_success_posts, key=self._post_success_key, reverse=True)[0]
+                takeaways.append(
+                    f"В верхние {success_bucket_label} по успешности входит пост «{leader_post['post_text']}»: {self._format_post_metrics(leader_post, priority='success')}."
+                )
+            if bottom_success_posts:
+                weakest_post = sorted(bottom_success_posts, key=self._post_success_key)[0]
+                takeaways.append(
+                    f"В нижние {success_bucket_label} по успешности входит пост «{weakest_post['post_text']}»: {self._format_post_metrics(weakest_post, priority='success')}."
+                )
+        elif primary_mode == "post_sentiment":
             if "most_negative_post" in prompt_modes and top_negative_posts:
                 lead_post = sorted(top_negative_posts, key=self._post_negative_key, reverse=True)[0]
                 takeaways.append(
@@ -2345,7 +2362,7 @@ class SummaryGenerator:
             if wants_success_buckets and bottom_success_posts:
                 weakest_post = sorted(bottom_success_posts, key=self._post_success_key)[0]
                 takeaways.append(
-                    f"В нижние 20% по успешности попадает пост «{weakest_post['post_text']}»: {self._format_post_metrics(weakest_post, priority='success')}."
+                    f"В нижние {success_bucket_label} по успешности попадает пост «{weakest_post['post_text']}»: {self._format_post_metrics(weakest_post, priority='success')}."
                 )
 
         elif primary_mode == "post_underperformance":
@@ -2367,7 +2384,7 @@ class SummaryGenerator:
             if wants_success_buckets and top_success_posts:
                 leader_post = sorted(top_success_posts, key=self._post_success_key, reverse=True)[0]
                 takeaways.append(
-                    f"Для сравнения: лидер верхних 20% — «{leader_post['post_text']}» с метриками {self._format_post_metrics(leader_post, priority='success')}."
+                    f"Для сравнения: лидер верхних {success_bucket_label} — «{leader_post['post_text']}» с метриками {self._format_post_metrics(leader_post, priority='success')}."
                 )
 
         elif primary_mode == "theme_popularity" and theme_map:
@@ -2456,6 +2473,8 @@ class SummaryGenerator:
         primary_mode = request.get("primary_mode") or "topic_report"
         prompt_modes = set(request.get("prompt_mode", []) or [])
         declared_theme = request.get("theme_of_posts")
+        success_bucket_percent = int(request.get("success_bucket_percent") or 20)
+        success_bucket_label = f"{success_bucket_percent}%"
 
         total_posts = int(stats.get("total_posts", 0) or 0)
         analyzed_comments = int(stats.get("analyzed_comments", 0) or 0)
@@ -2515,7 +2534,9 @@ class SummaryGenerator:
                 )
             paragraphs.append(direct)
 
-        elif primary_mode in {"theme_sentiment", "topic_report", "mixed", "post_sentiment"} and single_post:
+        elif primary_mode in {"theme_sentiment", "topic_report", "mixed", "post_sentiment"} and single_post and not (
+            primary_mode == "mixed" and wants_success_buckets
+        ):
             if analyzed_comments > 0:
                 relevant_comments_count = int(
                     single_post.get("relevant_comments_count", single_post.get("comments_count", 0)) or 0
@@ -2528,6 +2549,17 @@ class SummaryGenerator:
                     f"В центре текущего запроса один пост — «{single_post['post_text']}». По нему пока есть только метрики самой публикации: {self._format_post_metrics(single_post, priority='success')}."
                 )
 
+        elif primary_mode == "mixed" and wants_success_buckets:
+            if top_success_posts:
+                leader = sorted(top_success_posts, key=self._post_success_key, reverse=True)[0]
+                paragraphs.append(
+                    f"В верхние {success_bucket_label} по успешности входят посты с самыми сильными метриками просмотров и лайков или реакций. Лидером этого среза выглядит «{leader['post_text']}» с метриками {self._format_post_metrics(leader, priority='success')}."
+                )
+            if bottom_success_posts:
+                weakest = sorted(bottom_success_posts, key=self._post_success_key)[0]
+                paragraphs.append(
+                    f"В нижние {success_bucket_label} по успешности входят посты с самыми слабыми метриками просмотров и лайков или реакций. Самым слабым в текущем срезе выглядит «{weakest['post_text']}» с метриками {self._format_post_metrics(weakest, priority='success')}."
+                )
         elif primary_mode == "post_sentiment":
             if "most_negative_post" in prompt_modes and top_negative_posts:
                 lead = sorted(top_negative_posts, key=self._post_negative_key, reverse=True)[0]
@@ -2568,7 +2600,7 @@ class SummaryGenerator:
             if wants_success_buckets and bottom_success_posts:
                 weakest = sorted(bottom_success_posts, key=self._post_success_key)[0]
                 paragraphs.append(
-                    f"В нижние 20% по успешности попадает пост «{weakest['post_text']}» с метриками {self._format_post_metrics(weakest, priority='success')}."
+                    f"В нижние {success_bucket_label} по успешности попадает пост «{weakest['post_text']}» с метриками {self._format_post_metrics(weakest, priority='success')}."
                 )
 
         elif primary_mode == "post_underperformance":
@@ -2591,7 +2623,7 @@ class SummaryGenerator:
             if wants_success_buckets and top_success_posts:
                 leader = sorted(top_success_posts, key=self._post_success_key, reverse=True)[0]
                 paragraphs.append(
-                    f"Для сравнения, лидер верхних 20% выглядит как «{leader['post_text']}» с метриками {self._format_post_metrics(leader, priority='success')}."
+                    f"Для сравнения, лидер верхних {success_bucket_label} выглядит как «{leader['post_text']}» с метриками {self._format_post_metrics(leader, priority='success')}."
                 )
 
         elif primary_mode == "theme_sentiment" and theme_map:
@@ -2660,7 +2692,9 @@ class SummaryGenerator:
             elif derived_post_themes:
                 paragraphs.append(f"В текущем срезе заметнее всего сюжеты о {self._join_list(derived_post_themes[:4])}.")
 
-        if primary_mode not in {"source_comparison", "theme_sentiment"} and theme_map:
+        if primary_mode not in {"source_comparison", "theme_sentiment"} and theme_map and not (
+            primary_mode == "mixed" and wants_success_buckets
+        ):
             strongest_theme = sorted(
                 theme_map,
                 key=lambda item: (
