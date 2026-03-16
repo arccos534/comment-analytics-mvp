@@ -2,6 +2,7 @@ export interface AnalysisCreatePayload {
   prompt_text: string;
   theme?: string | null;
   keywords: string[];
+  analysis_mode_override?: AnalysisMode | "auto" | null;
   period_from?: string | null;
   period_to?: string | null;
   platforms: ("telegram" | "vk")[];
@@ -19,6 +20,7 @@ export interface AnalysisRun {
   filters_json: {
     platforms?: string[];
     source_ids?: string[];
+    analysis_mode_override?: AnalysisMode | null;
   } | null;
   status: "pending" | "running" | "completed" | "failed";
   created_at: string;

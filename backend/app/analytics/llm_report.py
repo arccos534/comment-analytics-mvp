@@ -10,6 +10,7 @@ from openai import OpenAI
 from redis import Redis
 
 from app.analytics.prompt_intent import (
+    apply_analysis_mode_override as apply_shared_analysis_mode_override,
     build_prompt_intent as build_shared_prompt_intent,
     extract_prompt_focus_terms as extract_shared_prompt_focus_terms,
 )
@@ -674,6 +675,11 @@ class SummaryGenerator:
         declared_theme = (report_json.get("meta", {}).get("post_theme") or "").strip() or None
         has_explicit_scope = bool(declared_theme or report_json.get("meta", {}).get("post_keywords"))
         prompt_intent = build_shared_prompt_intent(prompt_text, has_explicit_scope=has_explicit_scope)
+        prompt_intent = apply_shared_analysis_mode_override(
+            prompt_intent,
+            report_json.get("meta", {}).get("analysis_mode_override"),
+            has_explicit_scope=has_explicit_scope,
+        )
         analysis_axes = prompt_intent.analysis_axes
         theme_scoped_posts = self._filter_posts_for_declared_theme(
             matched_posts + top_popular + top_unpopular,

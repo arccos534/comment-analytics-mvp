@@ -298,6 +298,7 @@ class ReportAggregator:
                 "platforms": filters.get("platforms", []),
                 "source_ids": filters.get("source_ids", []),
                 "requested_success_bucket_percent": requested_success_bucket_percent,
+                "analysis_mode_override": (run.filters_json or {}).get("analysis_mode_override"),
             },
             "stats": {
                 "total_posts": total_posts,

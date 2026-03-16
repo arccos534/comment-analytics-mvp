@@ -10,6 +10,7 @@ from app.analytics.aggregator import ReportAggregator
 from app.analytics.keywords import KeywordExtractor
 from app.analytics.prompt_intent import (
     GENERIC_PROMPT_SCOPE_TERMS as SHARED_GENERIC_PROMPT_SCOPE_TERMS,
+    apply_analysis_mode_override as apply_shared_analysis_mode_override,
     build_prompt_intent as build_shared_prompt_intent,
     extract_prompt_scope_terms as extract_shared_prompt_scope_terms,
 )
@@ -231,6 +232,7 @@ class AnalyticsService:
             filters_json={
                 "platforms": [platform.value for platform in payload.platforms],
                 "source_ids": [str(source_id) for source_id in payload.source_ids],
+                "analysis_mode_override": (payload.analysis_mode_override or "").strip() or None,
             },
             status=AnalysisRunStatusEnum.pending,
         )
@@ -491,6 +493,11 @@ class AnalyticsService:
             )
             has_explicit_scope = bool((run.theme or "").strip() or (run.keywords_json or []))
             prompt_intent = build_shared_prompt_intent(run.prompt_text, has_explicit_scope=has_explicit_scope)
+            prompt_intent = apply_shared_analysis_mode_override(
+                prompt_intent,
+                (run.filters_json or {}).get("analysis_mode_override"),
+                has_explicit_scope=has_explicit_scope,
+            )
             source_only_prompt = prompt_intent.source_only
             if source_only_prompt:
                 scoped_posts = [

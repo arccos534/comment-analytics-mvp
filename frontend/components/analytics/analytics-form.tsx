@@ -8,9 +8,25 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select } from "@/components/ui/select";
 import { useRunAnalysis } from "@/hooks/use-analysis";
 import { useUiStore } from "@/store/ui-store";
+import { AnalysisMode } from "@/types/analytics";
 import { Source } from "@/types/source";
+
+const ANALYSIS_MODE_OPTIONS: Array<{ value: AnalysisMode | "auto"; label: string }> = [
+  { value: "auto", label: "Авто" },
+  { value: "source_comparison", label: "Сравнение источников" },
+  { value: "post_popularity", label: "Популярные посты" },
+  { value: "post_underperformance", label: "Слабые посты" },
+  { value: "post_sentiment", label: "Реакция на посты" },
+  { value: "theme_sentiment", label: "Темы и тональность" },
+  { value: "theme_interest", label: "Темы и интерес аудитории" },
+  { value: "theme_popularity", label: "Популярные темы" },
+  { value: "theme_underperformance", label: "Непопулярные темы" },
+  { value: "topic_report", label: "Тематический отчет" },
+  { value: "mixed", label: "Смешанный режим" },
+];
 
 export function AnalyticsForm({ projectId, sources }: { projectId: string; sources: Source[] }) {
   const router = useRouter();
@@ -20,13 +36,15 @@ export function AnalyticsForm({ projectId, sources }: { projectId: string; sourc
   const [promptText, setPromptText] = useState("");
   const [theme, setTheme] = useState("");
   const [keywords, setKeywords] = useState("");
+  const [analysisMode, setAnalysisMode] = useState<AnalysisMode | "auto">("auto");
   const [periodFrom, setPeriodFrom] = useState("");
   const [periodTo, setPeriodTo] = useState("");
   const [platforms, setPlatforms] = useState<string[]>(["telegram", "vk"]);
   const [selectedSourceIds, setSelectedSourceIds] = useState<string[]>([]);
 
   const readySources = useMemo(() => sources.filter((source) => source.status === "ready"), [sources]);
-  const allSourcesSelected = readySources.length > 0 && readySources.every((source) => selectedSourceIds.includes(source.id));
+  const allSourcesSelected =
+    readySources.length > 0 && readySources.every((source) => selectedSourceIds.includes(source.id));
 
   async function handleSubmit() {
     const run = await runAnalysis.mutateAsync({
@@ -36,6 +54,7 @@ export function AnalyticsForm({ projectId, sources }: { projectId: string; sourc
         .split(",")
         .map((value) => value.trim())
         .filter(Boolean),
+      analysis_mode_override: analysisMode === "auto" ? null : analysisMode,
       period_from: periodFrom ? new Date(periodFrom).toISOString() : null,
       period_to: periodTo ? new Date(periodTo).toISOString() : null,
       platforms: platforms as ("telegram" | "vk")[],
@@ -66,8 +85,7 @@ export function AnalyticsForm({ projectId, sources }: { projectId: string; sourc
       <CardHeader>
         <CardTitle>Generate report</CardTitle>
         <CardDescription>
-          Тема и keywords относятся к постам и новостям. Prompt задает фокус анализа комментариев и
-          источников.
+          Тема и keywords относятся к постам и новостям. Prompt задает фокус анализа комментариев и источников.
         </CardDescription>
       </CardHeader>
       <CardContent className="grid gap-6 lg:grid-cols-2">
@@ -99,6 +117,24 @@ export function AnalyticsForm({ projectId, sources }: { projectId: string; sourc
               placeholder="Например: сравни активность источников и реакцию аудитории на их новости"
             />
           </div>
+          <div className="space-y-2">
+            <Label htmlFor="analysis-mode">Режим анализа</Label>
+            <Select
+              id="analysis-mode"
+              value={analysisMode}
+              onChange={(event) => setAnalysisMode(event.target.value as AnalysisMode | "auto")}
+            >
+              {ANALYSIS_MODE_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </Select>
+            <div className="text-xs text-muted-foreground">
+              Авто сам определяет режим по prompt. Ручной выбор задает основной вектор анализа, а prompt уточняет тему,
+              период и формат ответа.
+            </div>
+          </div>
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2">
               <Label htmlFor="period-from">From</Label>
@@ -111,7 +147,12 @@ export function AnalyticsForm({ projectId, sources }: { projectId: string; sourc
             </div>
             <div className="space-y-2">
               <Label htmlFor="period-to">To</Label>
-              <Input id="period-to" type="date" value={periodTo} onChange={(event) => setPeriodTo(event.target.value)} />
+              <Input
+                id="period-to"
+                type="date"
+                value={periodTo}
+                onChange={(event) => setPeriodTo(event.target.value)}
+              />
             </div>
           </div>
         </div>
@@ -130,7 +171,13 @@ export function AnalyticsForm({ projectId, sources }: { projectId: string; sourc
           <div className="space-y-3">
             <div className="flex items-center justify-between gap-3">
               <Label>Sources</Label>
-              <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={toggleAllSources} disabled={!readySources.length}>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 px-2 text-xs"
+                onClick={toggleAllSources}
+                disabled={!readySources.length}
+              >
                 {allSourcesSelected ? "Clear all" : "Select all"}
               </Button>
             </div>
@@ -138,7 +185,10 @@ export function AnalyticsForm({ projectId, sources }: { projectId: string; sourc
               {readySources.length ? (
                 readySources.map((source) => (
                   <label key={source.id} className="flex items-start gap-3 rounded-xl bg-white/5 px-3 py-2 text-sm">
-                    <Checkbox checked={selectedSourceIds.includes(source.id)} onCheckedChange={() => toggleSource(source.id)} />
+                    <Checkbox
+                      checked={selectedSourceIds.includes(source.id)}
+                      onCheckedChange={() => toggleSource(source.id)}
+                    />
                     <span>{source.title || source.source_url}</span>
                   </label>
                 ))

@@ -11,6 +11,7 @@ class AnalysisCreateRequest(BaseModel):
     prompt_text: str = Field(min_length=1)
     theme: str | None = None
     keywords: list[str] = Field(default_factory=list)
+    analysis_mode_override: str | None = None
     period_from: datetime | None = None
     period_to: datetime | None = None
     platforms: list[PlatformEnum] = Field(default_factory=list)

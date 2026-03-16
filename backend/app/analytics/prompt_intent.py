@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import re
 
 GENERIC_PROMPT_SCOPE_TERMS = {
@@ -182,6 +182,20 @@ class PromptIntent:
     scope_terms: list[str]
     generic_scope: bool
     source_only: bool
+
+
+PRIMARY_MODE_REQUIRED_AXES: dict[str, list[str]] = {
+    "source_comparison": ["source_metrics"],
+    "post_popularity": ["post_scope"],
+    "post_underperformance": ["post_scope"],
+    "post_sentiment": ["post_scope", "comment_reaction"],
+    "theme_sentiment": ["post_scope", "comment_reaction"],
+    "theme_interest": ["post_scope", "comment_reaction"],
+    "theme_popularity": ["post_scope"],
+    "theme_underperformance": ["post_scope"],
+    "topic_report": ["post_scope"],
+    "mixed": ["post_scope"],
+}
 
 
 def normalize_prompt_text(value: str | None) -> str:
@@ -539,6 +553,47 @@ def build_prompt_intent(prompt_text: str | None, has_explicit_scope: bool = Fals
         answer_strategy=build_answer_strategy(prompt_text, analysis_axes, primary_mode, secondary_modes),
         focus_terms=focus_terms,
         scope_terms=scope_terms,
+        generic_scope=generic_scope,
+        source_only=source_only,
+    )
+
+
+def apply_analysis_mode_override(
+    intent: PromptIntent,
+    override_mode: str | None,
+    has_explicit_scope: bool = False,
+) -> PromptIntent:
+    override = (override_mode or "").strip()
+    if not override:
+        return intent
+
+    allowed_modes = set(PRIMARY_MODE_PRIORITY) | {"post_sentiment", "theme_popularity", "theme_underperformance"}
+    if override not in allowed_modes:
+        return intent
+
+    secondary_modes = [mode for mode in intent.secondary_modes if mode != override]
+    analysis_axes = list(intent.analysis_axes)
+    for axis in PRIMARY_MODE_REQUIRED_AXES.get(override, []):
+        if axis not in analysis_axes:
+            analysis_axes.append(axis)
+
+    source_only = override == "source_comparison" and not has_explicit_scope
+    generic_scope = intent.generic_scope or override in {
+        "source_comparison",
+        "post_popularity",
+        "post_underperformance",
+        "post_sentiment",
+        "theme_popularity",
+        "theme_underperformance",
+    }
+
+    return replace(
+        intent,
+        analysis_axes=analysis_axes,
+        primary_mode=override,
+        secondary_modes=secondary_modes,
+        request_contract=infer_request_contract(intent.prompt_text, override, secondary_modes),
+        answer_strategy=build_answer_strategy(intent.prompt_text, analysis_axes, override, secondary_modes),
         generic_scope=generic_scope,
         source_only=source_only,
     )
