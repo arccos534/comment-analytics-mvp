@@ -112,6 +112,7 @@ class ReportAggregator:
                         "comment_id": str(item["comment"].id),
                         "text": item["comment"].text,
                         "sentiment": sentiment,
+                        "sentiment_score": item.get("sentiment_score"),
                         "relevance_score": item["relevance_score"],
                         "post_url": item["post"].post_url,
                     }
@@ -427,9 +428,9 @@ class ReportAggregator:
         subset = sorted(items, key=lambda item: item.get("relevance_score", 0), reverse=True)
         aligned_subset = [
             item for item in subset
-            if self._matches_expected_comment_sentiment(item.get("text") or "", expected_sentiment)
+            if self._matches_expected_comment_sentiment(item, expected_sentiment)
         ]
-        if aligned_subset:
+        if expected_sentiment:
             subset = aligned_subset
         seen: set[str] = set()
         examples: list[dict] = []
@@ -443,6 +444,7 @@ class ReportAggregator:
                     "comment_id": item.get("comment_id"),
                     "text": item.get("text") or "",
                     "sentiment": item.get("sentiment"),
+                    "sentiment_score": item.get("sentiment_score"),
                     "relevance_score": item.get("relevance_score"),
                     "post_url": item.get("post_url"),
                 }
@@ -451,17 +453,33 @@ class ReportAggregator:
                 break
         return examples
 
-    def _matches_expected_comment_sentiment(self, text: str, expected_sentiment: str | None) -> bool:
+    def _matches_expected_comment_sentiment(self, item: dict, expected_sentiment: str | None) -> bool:
         if not expected_sentiment or expected_sentiment == "neutral":
             return True
 
+        text = item.get("text") or ""
+        base_sentiment = item.get("sentiment")
+        try:
+            base_score = float(item.get("sentiment_score") or 0.0)
+        except (TypeError, ValueError):
+            base_score = 0.0
         positive_hits, negative_hits = self._comment_sentiment_hints(text)
-        if positive_hits == 0 and negative_hits == 0:
-            return True
         if expected_sentiment == "positive":
-            return positive_hits >= negative_hits
+            if base_sentiment == "negative" or base_score <= 0:
+                return False
+            if negative_hits > positive_hits:
+                return False
+            if positive_hits == 0 and base_score < 0.18:
+                return False
+            return True
         if expected_sentiment == "negative":
-            return negative_hits >= positive_hits
+            if base_sentiment == "positive" or base_score >= 0:
+                return False
+            if positive_hits > negative_hits:
+                return False
+            if negative_hits == 0 and base_score > -0.18:
+                return False
+            return True
         return True
 
     def _comment_sentiment_hints(self, text: str) -> tuple[int, int]:

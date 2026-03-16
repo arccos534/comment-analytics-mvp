@@ -1881,21 +1881,32 @@ class SummaryGenerator:
             return 3 if {"negative_analysis", "positive_analysis"} & mode_set else 1
         return 5
 
+    def _has_sentiment_advantage(self, item: dict, sentiment: str) -> bool:
+        positive = int(item.get("positive_relevant_comments_count", 0) or 0)
+        negative = int(item.get("negative_relevant_comments_count", 0) or 0)
+        if sentiment == "positive":
+            if positive <= negative:
+                return False
+            return (positive - negative) >= 3 or positive >= max(6, int(negative * 1.2))
+        if sentiment == "negative":
+            if negative <= positive:
+                return False
+            return (negative - positive) >= 3 or negative >= max(6, int(positive * 1.2))
+        return False
+
     def _select_sentiment_posts(self, posts: list[dict], sentiment: str, limit: int) -> list[dict]:
         if sentiment == "positive":
             dominant_posts = [
                 post
                 for post in posts
-                if int(post.get("positive_relevant_comments_count", 0) or 0)
-                > int(post.get("negative_relevant_comments_count", 0) or 0)
+                if self._has_sentiment_advantage(post, "positive")
             ]
             ranked = sorted(dominant_posts, key=self._post_positive_key, reverse=True)
         else:
             dominant_posts = [
                 post
                 for post in posts
-                if int(post.get("negative_relevant_comments_count", 0) or 0)
-                > int(post.get("positive_relevant_comments_count", 0) or 0)
+                if self._has_sentiment_advantage(post, "negative")
             ]
             ranked = sorted(dominant_posts, key=self._post_negative_key, reverse=True)
         return ranked[: max(limit, 1)]
@@ -3494,15 +3505,29 @@ class SummaryGenerator:
 
         aligned: list[dict] = []
         for example in examples:
+            base_sentiment = example.get("sentiment")
+            try:
+                base_score = float(example.get("sentiment_score") or 0.0)
+            except (TypeError, ValueError):
+                base_score = 0.0
             positive_hits, negative_hits = self._comment_sentiment_hint_score(example.get("text") or "")
-            if positive_hits == 0 and negative_hits == 0:
+            if sentiment == "positive":
+                if base_sentiment == "negative" or base_score <= 0:
+                    continue
+                if negative_hits > positive_hits:
+                    continue
+                if positive_hits == 0 and base_score < 0.18:
+                    continue
                 aligned.append(example)
-                continue
-            if sentiment == "positive" and positive_hits >= negative_hits:
+            elif sentiment == "negative":
+                if base_sentiment == "positive" or base_score >= 0:
+                    continue
+                if positive_hits > negative_hits:
+                    continue
+                if negative_hits == 0 and base_score > -0.18:
+                    continue
                 aligned.append(example)
-            if sentiment == "negative" and negative_hits >= positive_hits:
-                aligned.append(example)
-        return aligned or examples
+        return aligned
 
     def _build_reason_labels_from_examples(self, examples: list[dict], sentiment: str | None, limit: int = 3) -> list[str]:
         if sentiment not in {"positive", "negative"}:
@@ -3567,6 +3592,59 @@ class SummaryGenerator:
             "neutral": "нейтральных",
         }.get(sentiment, "релевантных")
         return f"{self._comment_reason_summary(examples, sentiment_label, sentiment=sentiment)}{self._comment_examples_phrase(examples)}"
+
+    def _comment_reason_summary(self, examples: list[dict], sentiment_label: str, sentiment: str | None = None) -> str:
+        filtered_examples = self._filter_examples_for_requested_sentiment(examples, sentiment) if sentiment else examples
+        if not filtered_examples:
+            return ""
+
+        reason_labels = self._build_reason_labels_from_examples(filtered_examples, sentiment)
+        if reason_labels:
+            lead = f"Чаще всего в {sentiment_label} комментариях пишут о {reason_labels[0]}."
+            if len(reason_labels) > 1:
+                return f"{lead} Дополнительно упоминают {self._join_list(reason_labels[1:3])}."
+            return lead
+
+        phrase_topics = [
+            item for item in self._extract_signal_topics_from_examples(filtered_examples, limit=3)
+            if len(item.split()) >= 2
+        ]
+        if phrase_topics:
+            lead = f"Чаще всего в {sentiment_label} комментариях обсуждают {phrase_topics[0]}."
+            if len(phrase_topics) > 1:
+                return f"{lead} Также регулярно встречаются формулировки про {self._join_list(phrase_topics[1:3])}."
+            return lead
+        return ""
+
+    def _build_post_reason_snippet(self, post: dict, sentiment: str) -> str:
+        examples = self._examples_for_sentiment(post, sentiment)
+        if not examples:
+            return ""
+        sentiment_label = {
+            "positive": "позитивных",
+            "negative": "негативных",
+            "neutral": "нейтральных",
+        }.get(sentiment, "релевантных")
+        reason_summary = self._comment_reason_summary(examples, sentiment_label, sentiment=sentiment)
+        examples_phrase = self._comment_examples_phrase(examples, limit=1)
+        if reason_summary and examples_phrase:
+            return f"{reason_summary} {examples_phrase.strip()}"
+        return f"{reason_summary}{examples_phrase}".strip()
+
+    def _build_theme_reason_snippet(self, theme: dict, sentiment: str) -> str:
+        examples = self._examples_for_sentiment(theme, sentiment)
+        if not examples:
+            return ""
+        sentiment_label = {
+            "positive": "позитивных",
+            "negative": "негативных",
+            "neutral": "нейтральных",
+        }.get(sentiment, "релевантных")
+        reason_summary = self._comment_reason_summary(examples, sentiment_label, sentiment=sentiment)
+        examples_phrase = self._comment_examples_phrase(examples, limit=1)
+        if reason_summary and examples_phrase:
+            return f"{reason_summary} {examples_phrase.strip()}"
+        return f"{reason_summary}{examples_phrase}".strip()
 
     def _join_list(self, items: list[str]) -> str:
         cleaned = [item for item in items if item]
