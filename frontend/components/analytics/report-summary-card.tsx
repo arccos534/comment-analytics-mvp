@@ -1,3 +1,5 @@
+"use client";
+
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { AnalysisMode } from "@/types/analytics";
 
@@ -5,8 +7,11 @@ const MODE_LABELS: Record<AnalysisMode, string> = {
   source_comparison: "Сравнение источников",
   post_popularity: "Популярность постов",
   post_underperformance: "Слабые посты",
+  post_sentiment: "Реакция на посты",
   theme_sentiment: "Темы и тональность",
   theme_interest: "Темы и интерес аудитории",
+  theme_popularity: "Популярные темы",
+  theme_underperformance: "Непопулярные темы",
   topic_report: "Тематический отчет",
   excel_export: "Табличный режим",
   mixed: "Смешанный режим",

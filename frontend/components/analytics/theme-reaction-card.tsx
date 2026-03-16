@@ -28,21 +28,25 @@ function getEngagementLabel(item: ThemeReactionItem) {
 export function ThemeReactionCard({
   items,
   confidence,
+  title = "Темы и реакция аудитории",
+  description = "Какие сюжетные темы вызывают интерес и какой тип реакции они собирают.",
+  emptyText = "Для текущей выборки карта тем и реакции пока не сформировалась.",
 }: {
   items: ThemeReactionItem[];
   confidence?: {
     level: "high" | "medium" | "low";
     reason: string;
   };
+  title?: string;
+  description?: string;
+  emptyText?: string;
 }) {
   return (
     <Card className="border-white/10 bg-card/70 backdrop-blur">
       <CardHeader className="flex flex-row items-start justify-between gap-4">
         <div>
-          <CardTitle>Темы и реакция аудитории</CardTitle>
-          <div className="mt-1 text-sm text-muted-foreground">
-            Какие сюжетные темы вызывают интерес и какой тип реакции они собирают.
-          </div>
+          <CardTitle>{title}</CardTitle>
+          <div className="mt-1 text-sm text-muted-foreground">{description}</div>
         </div>
         {confidence ? (
           <div
@@ -64,7 +68,10 @@ export function ThemeReactionCard({
         {items.length ? (
           <div className="space-y-3">
             {items.map((item) => (
-              <div key={`${item.theme}-${item.leading_post.post_id || item.leading_post.post_url || "theme"}`} className="rounded-2xl border border-border/60 bg-background/50 p-4">
+              <div
+                key={`${item.theme}-${item.leading_post.post_id || item.leading_post.post_url || "theme"}`}
+                className="rounded-2xl border border-border/60 bg-background/50 p-4"
+              >
                 <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                   <div>
                     <div className="text-base font-semibold">{item.theme}</div>
@@ -116,7 +123,7 @@ export function ThemeReactionCard({
           </div>
         ) : (
           <div className="rounded-2xl border border-border/60 bg-background/45 px-4 py-5 text-sm text-muted-foreground">
-            Для текущей выборки карта тем и реакции пока не сформировалась.
+            {emptyText}
           </div>
         )}
       </CardContent>

@@ -16,7 +16,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Select } from "@/components/ui/select";
 import { useAnalysisRun, useReport } from "@/hooks/use-analysis";
-import { AnalysisMode, ReportPost, ReportSnapshot } from "@/types/analytics";
+import { AnalysisMode, ReportPost, ReportSnapshot, ThemeReactionItem } from "@/types/analytics";
 
 const DISPLAY_OPTIONS = [3, 5, 10, 20];
 
@@ -26,8 +26,90 @@ type PostSection = {
   posts: ReportPost[];
 };
 
+type ThemeCardConfig = {
+  title: string;
+  description: string;
+  items: ThemeReactionItem[];
+  emptyText?: string;
+};
+
 function getAnalysisMode(report: ReportSnapshot["report_json"]): AnalysisMode {
   return report.summary.primary_mode || report.summary.analysis_mode || "topic_report";
+}
+
+function getRequestedCount(promptText?: string | null): number | null {
+  const text = (promptText || "").toLowerCase();
+  if (!text) {
+    return null;
+  }
+
+  const patterns = [
+    /(?:топ|top)\s*(\d{1,2})/i,
+    /выдел(?:и|ить)?[^0-9]{0,24}(\d{1,2})/i,
+    /(\d{1,2})\s*(?:сам\w+\s+)?(?:популярн|непопулярн|слаб|сильн|успешн)/i,
+  ];
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (!match) {
+      continue;
+    }
+    const parsed = Number.parseInt(match[1], 10);
+    if (Number.isFinite(parsed) && parsed > 0) {
+      return parsed;
+    }
+  }
+  return null;
+}
+
+function getThemeSuccessScore(item: ThemeReactionItem): number {
+  return (
+    Number(item.views_count || 0) * 5 +
+    Number(item.likes_count || 0) * 4 +
+    Number(item.comments_count || 0) * 3 +
+    Number(item.reposts_count || 0) * 2 +
+    Number(item.posts_count || 0)
+  );
+}
+
+function getThemeCardConfig(report: ReportSnapshot["report_json"], mode: AnalysisMode): ThemeCardConfig {
+  const baseItems = [...(report.summary.theme_reaction_map || [])];
+  const requestedCount = getRequestedCount(report.meta.prompt_text);
+
+  if (mode === "theme_popularity") {
+    const items = [...baseItems].sort((left, right) => getThemeSuccessScore(right) - getThemeSuccessScore(left));
+    return {
+      title: requestedCount ? `Топ ${requestedCount} популярных тем` : "Популярные темы",
+      description: "Темы ранжированы по совокупности просмотров, реакций, комментариев и репостов ведущих постов.",
+      items: requestedCount ? items.slice(0, requestedCount) : items,
+      emptyText: "Для выбранного запроса пока не удалось выделить популярные темы.",
+    };
+  }
+
+  if (mode === "theme_underperformance") {
+    const items = [...baseItems].sort((left, right) => getThemeSuccessScore(left) - getThemeSuccessScore(right));
+    return {
+      title: requestedCount ? `Топ ${requestedCount} непопулярных тем` : "Непопулярные темы",
+      description: "Темы ранжированы по самым слабым метрикам ведущих постов внутри текущего среза.",
+      items: requestedCount ? items.slice(0, requestedCount) : items,
+      emptyText: "Для выбранного запроса пока не удалось выделить непопулярные темы.",
+    };
+  }
+
+  if (mode === "post_sentiment") {
+    return {
+      title: "Темы с позитивной и негативной реакцией",
+      description: "Какие сюжетные темы собирают негатив, а какие вызывают более позитивную реакцию аудитории.",
+      items: baseItems,
+      emptyText: "Для текущей выборки карта тем и реакции пока не сформировалась.",
+    };
+  }
+
+  return {
+    title: "Темы и реакция аудитории",
+    description: "Какие сюжетные темы вызывают интерес и какой тип реакции они собирают.",
+    items: baseItems,
+    emptyText: "Для текущей выборки карта тем и реакции пока не сформировалась.",
+  };
 }
 
 function getPostSections(report: ReportSnapshot["report_json"], mode: AnalysisMode): PostSection[] {
@@ -35,6 +117,8 @@ function getPostSections(report: ReportSnapshot["report_json"], mode: AnalysisMo
   const promptModes = new Set(report.summary.prompt_modes || []);
   const showSuccessTopBucket = promptModes.has("successful_posts_bucket");
   const showSuccessBottomBucket = promptModes.has("underperforming_posts_bucket");
+  const topPositivePosts = report.summary.top_positive_posts || [];
+  const topNegativePosts = report.summary.top_negative_posts || [];
 
   if (mode === "source_comparison") {
     return [
@@ -50,7 +134,7 @@ function getPostSections(report: ReportSnapshot["report_json"], mode: AnalysisMo
       },
       {
         title: "Лидеры по успешности",
-        description: "Верхние 20% по просмотрам, реакциям и комментариям.",
+        description: "Верхние N% по просмотрам, реакциям и комментариям, только если это прямо запрошено в промте.",
         posts: showSuccessTopBucket ? postGroups.success_top_bucket || [] : [],
       },
     ];
@@ -71,8 +155,8 @@ function getPostSections(report: ReportSnapshot["report_json"], mode: AnalysisMo
         ),
       },
       {
-        title: "Верхние 20% по успешности",
-        description: "Самые сильные посты по совокупности доступных метрик.",
+        title: "Верхние N% по успешности",
+        description: "Секция появляется только когда пользователь явно просит выделить процент лидеров.",
         posts: showSuccessTopBucket ? postGroups.success_top_bucket || [] : [],
       },
     ];
@@ -91,9 +175,73 @@ function getPostSections(report: ReportSnapshot["report_json"], mode: AnalysisMo
         posts: postGroups.top_undiscussed || [],
       },
       {
-        title: "Нижние 20% по успешности",
-        description: "Посты с самыми слабыми доступными метриками.",
+        title: "Нижние N% по успешности",
+        description: "Секция появляется только когда пользователь явно просит выделить процент слабых постов.",
         posts: showSuccessBottomBucket ? postGroups.success_bottom_bucket || [] : [],
+      },
+    ];
+  }
+
+  if (mode === "post_sentiment") {
+    return [
+      {
+        title: "Посты с самой негативной реакцией",
+        description: "Лидеры по числу негативных релевантных комментариев и признакам недовольства аудитории.",
+        posts: topNegativePosts,
+      },
+      {
+        title: "Посты с самой позитивной реакцией",
+        description: "Лидеры по числу позитивных релевантных комментариев и признакам поддержки аудитории.",
+        posts: topPositivePosts,
+      },
+      {
+        title: "Посты в фокусе анализа",
+        description: "Публикации, которые реально попали в текущий аналитический срез по запросу.",
+        posts: postGroups.matched || [],
+      },
+    ];
+  }
+
+  if (mode === "theme_popularity") {
+    return [
+      {
+        title: "Посты в популярных темах",
+        description: "Публикации, которые легли в основу ранжирования популярных тем.",
+        posts: postGroups.matched || [],
+      },
+      {
+        title: "Лидеры по реакциям",
+        description: "Посты с наибольшим числом лайков или реакций внутри выбранной темы.",
+        posts: postGroups.top_reacted || [],
+      },
+      {
+        title: "Лидеры по просмотрам",
+        description: "Посты с наибольшим охватом внутри выбранной темы или периода.",
+        posts: [...(postGroups.top_popular || [])].sort(
+          (left, right) => Number(right.views_count || 0) - Number(left.views_count || 0)
+        ),
+      },
+    ];
+  }
+
+  if (mode === "theme_underperformance") {
+    return [
+      {
+        title: "Посты в слабых темах",
+        description: "Публикации, которые легли в основу ранжирования непопулярных тем.",
+        posts: postGroups.matched || [],
+      },
+      {
+        title: "Аутсайдеры по реакциям",
+        description: "Посты с наименьшим числом лайков или реакций внутри выбранной темы или периода.",
+        posts: postGroups.top_unreacted || [],
+      },
+      {
+        title: "Аутсайдеры по просмотрам",
+        description: "Посты с наименьшим охватом внутри выбранной темы или периода.",
+        posts: [...(postGroups.top_unpopular || [])].sort(
+          (left, right) => Number(left.views_count || 0) - Number(right.views_count || 0)
+        ),
       },
     ];
   }
@@ -151,7 +299,8 @@ export default function ReportPage({ params }: { params: { projectId: string; re
   const isSourceMode = analysisMode === "source_comparison";
   const postSections = getPostSections(report, analysisMode);
   const comparisonItems = report.sources?.comparison || [];
-  const hasThemes = (report.summary.theme_reaction_map || []).length > 0;
+  const themeCard = getThemeCardConfig(report, analysisMode);
+  const hasThemes = themeCard.items.length > 0;
   const hasComments = report.stats.analyzed_comments > 0;
 
   return (
@@ -177,8 +326,11 @@ export default function ReportPage({ params }: { params: { projectId: string; re
 
       {!isSourceMode && hasThemes ? (
         <ThemeReactionCard
-          items={report.summary.theme_reaction_map || []}
+          items={themeCard.items}
           confidence={report.summary.confidence_assessment}
+          title={themeCard.title}
+          description={themeCard.description}
+          emptyText={themeCard.emptyText}
         />
       ) : null}
 
@@ -194,7 +346,8 @@ export default function ReportPage({ params }: { params: { projectId: string; re
         <div>
           <div className="text-sm font-medium text-foreground">Посты и лидеры выборки</div>
           <div className="text-xs text-muted-foreground">
-            Набор карточек подстраивается под задачу: сравнение источников, поиск лидеров, аутсайдеров или тематический отчет.
+            Набор карточек подстраивается под задачу: сравнение источников, поиск лидеров, аутсайдеров, реакцию на посты
+            или тематический отчет.
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-3">
@@ -226,14 +379,16 @@ export default function ReportPage({ params }: { params: { projectId: string; re
 
       {showPostPanels ? (
         <div className="grid gap-5 xl:grid-cols-3">
-          {postSections.filter((section) => section.posts.length > 0).map((section) => (
-            <TopPostsCard
-              key={section.title}
-              title={section.title}
-              description={section.description}
-              posts={section.posts.slice(0, visibleLimit)}
-            />
-          ))}
+          {postSections
+            .filter((section) => section.posts.length > 0)
+            .map((section) => (
+              <TopPostsCard
+                key={section.title}
+                title={section.title}
+                description={section.description}
+                posts={section.posts.slice(0, visibleLimit)}
+              />
+            ))}
         </div>
       ) : null}
     </div>

@@ -1,419 +1,156 @@
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
-
-PROMPT_STOPWORDS = {
-    "это",
-    "этот",
-    "эта",
-    "эти",
-    "такой",
-    "такая",
-    "такие",
-    "также",
-    "просто",
-    "очень",
-    "снова",
-    "будет",
-    "будут",
-    "после",
-    "между",
-    "через",
-    "только",
-    "сегодня",
-    "вчера",
-    "завтра",
-    "здесь",
-    "там",
-    "тоже",
-    "тогда",
-    "потом",
-    "если",
-    "вот",
-    "все",
-    "всего",
-    "всем",
-    "всех",
-    "или",
-    "для",
-    "при",
-    "под",
-    "над",
-    "про",
-    "как",
-    "что",
-    "чтобы",
-    "где",
-    "когда",
-    "было",
-    "были",
-    "был",
-    "была",
-    "год",
-    "года",
-    "лет",
-    "месяц",
-    "месяца",
-    "неделя",
-    "недели",
-    "день",
-    "дня",
-    "дней",
-    "час",
-    "часа",
-    "часов",
-    "первый",
-    "первая",
-    "первые",
-    "второй",
-    "вторая",
-    "вторые",
-    "третий",
-    "третья",
-    "новый",
-    "новая",
-    "новые",
-    "старый",
-    "старые",
-    "самый",
-    "самая",
-    "самые",
-    "самой",
-    "свои",
-    "свой",
-    "своих",
-    "наш",
-    "наши",
-    "ваш",
-    "ваши",
-    "сказал",
-    "сказала",
-    "заявил",
-    "заявила",
-    "сообщил",
-    "сообщила",
-    "говорит",
-    "пишет",
-    "россия",
-    "россии",
-    "москва",
-    "москве",
-    "область",
-    "области",
-    "район",
-    "района",
-    "край",
-    "края",
-    "новость",
-    "новости",
-    "пост",
-    "посты",
-    "публикация",
-    "публикации",
-    "сообщение",
-    "сообщения",
-    "обсуждение",
-    "обсуждения",
-    "реакция",
-    "реакции",
-    "лайки",
-    "лайков",
-    "просмотры",
-    "просмотров",
-    "охват",
-    "охваты",
-    "аудитория",
-    "аудитории",
-    "комментарий",
-    "комментарии",
-    "комментариях",
-    "telegram",
-    "телеграм",
-    "vk",
-    "канал",
-    "канале",
-    "каналы",
-    "сообщество",
-    "сообщества",
-    "источник",
-    "источники",
-    "город",
-    "города",
-    "городе",
-    "люди",
-    "людей",
-    "жители",
-    "житель",
-    "проанализируй",
-    "проанализировать",
-    "анализ",
-    "какой",
-    "какая",
-    "какие",
-    "какого",
-    "каких",
-    "какому",
-    "каким",
-    "которая",
-    "который",
-    "которые",
-    "которое",
-    "которых",
-    "больше",
-    "меньше",
-    "собрала",
-    "собрал",
-    "собрали",
-    "получила",
-    "получил",
-    "получили",
-    "найди",
-    "найти",
-    "покажи",
-    "показать",
-    "определи",
-    "выдели",
-    "расскажи",
-    "объясни",
-    "сделай",
-    "нужно",
-    "надо",
-    "хочу",
-    "ли",
-    "наиболее",
-}
+import re
 
 GENERIC_PROMPT_SCOPE_TERMS = {
+    "анализ",
+    "аналитику",
+    "аналитика",
+    "анализируй",
+    "анализировать",
+    "какая",
+    "какие",
+    "какой",
+    "какую",
+    "каком",
+    "какому",
+    "каких",
+    "каким",
+    "какое",
     "новость",
     "новости",
     "пост",
     "посты",
-    "тема",
-    "темы",
-    "сюжет",
-    "сюжеты",
-    "люди",
-    "думают",
-    "мнение",
-    "реакция",
-    "реакции",
-    "лайки",
-    "лайков",
-    "просмотры",
-    "просмотров",
-    "охват",
-    "охваты",
-    "комментарии",
-    "комментариев",
-    "успешные",
-    "успешность",
-    "неуспешные",
-    "непопулярные",
-    "популярные",
-    "популярность",
-}
-
-SOURCE_METRIC_TERMS = {
-    "канал",
-    "канале",
-    "каналы",
-    "сообщество",
-    "сообщества",
-    "источник",
-    "источники",
-    "аудитория",
-    "аудитории",
-    "активная",
-    "активность",
-    "вовлеченность",
-    "метрики",
-    "охват",
-    "охваты",
-    "подписчики",
-    "подписчиков",
-    "подписчик",
-}
-
-POST_SCOPE_TERMS = {
-    "пост",
-    "посты",
-    "новость",
-    "новости",
     "публикация",
     "публикации",
-    "тема",
-    "темы",
-    "тему",
-    "сюжет",
-    "сюжеты",
-    "успешные",
-    "неуспешные",
-    "популярные",
-    "непопулярные",
-}
-
-COMMENT_REACTION_TERMS = {
-    "комментарий",
+    "аудитория",
+    "аудитории",
+    "люди",
+    "людей",
     "комментарии",
     "комментариев",
     "реакция",
     "реакции",
-    "думают",
-    "мнение",
-    "отношение",
-    "позитив",
-    "негатив",
-    "эмоции",
-    "жалобы",
-    "претензии",
-    "критикуют",
-    "поддерживают",
-    "поддержка",
-    "тревога",
+    "реакцию",
+    "тема",
+    "темы",
+    "сюжет",
+    "сюжеты",
+    "что",
+    "почему",
+    "какую",
+    "выдели",
+    "покажи",
+    "найди",
+    "отчет",
+    "отчёт",
 }
 
-RAW_MODE_PATTERNS: list[tuple[str, str]] = [
-    (r"(excel|эксель|xlsx|таблиц[ауыое]|выгрузк[ауыи])", "excel_export"),
-    (r"(какую|какая|что).*(реакц|думают|воспринимают).*(новость|пост|публикац)", "theme_sentiment"),
-    (r"сам[а-я]* обсужда|наиболее обсужда", "most_discussed_news"),
-    (r"(больше всего|наибольш[а-я]*|максимальн[а-я]*).*(реакц|лайк)", "most_reacted_post"),
-    (r"(реакц|лайк).*(больше всего|наибольш[а-я]*|максимальн[а-я]*)", "most_reacted_post"),
-    (r"(больше всего|наибольш[а-я]*|максимальн[а-я]*).*(просмотр|охват)", "most_viewed_post"),
-    (r"(просмотр|охват).*(больше всего|наибольш[а-я]*|максимальн[а-я]*)", "most_viewed_post"),
-    (r"(меньше всего|наименьш[а-я]*|минимальн[а-я]*|худш[а-я]*|слаб[а-я]*).*(реакц|лайк)", "least_reacted_post"),
-    (r"(реакц|лайк).*(меньше всего|наименьш[а-я]*|минимальн[а-я]*|худш[а-я]*|слаб[а-я]*)", "least_reacted_post"),
-    (r"(меньше всего|наименьш[а-я]*|минимальн[а-я]*|худш[а-я]*|слаб[а-я]*).*(просмотр|охват)", "least_viewed_post"),
-    (r"(просмотр|охват).*(меньше всего|наименьш[а-я]*|минимальн[а-я]*|худш[а-я]*|слаб[а-я]*)", "least_viewed_post"),
-    (r"(успешн|популярн).*(20%|20 процентов|верхн|n процентов|процент[а-я]* самых)", "successful_posts_bucket"),
-    ("(\\d+\\s*%|\\d+\\s*процент[а-я]*|n процентов).*(успешн|популярн).*(пост|публикац)", "successful_posts_bucket"),
-    (r"(наиболее|самые|лучшие).*(успешн|популярн).*(пост|публикац)", "successful_posts_bucket"),
-    (r"(неуспешн|непопулярн|слаб[а-я]*|худш[а-я]*).*(20%|20 процентов|нижн|n процентов|процент[а-я]* самых)", "underperforming_posts_bucket"),
-    ("(\\d+\\s*%|\\d+\\s*процент[а-я]*|n процентов).*(неуспешн|непопулярн|слаб[а-я]*|худш[а-я]*).*(пост|публикац)", "underperforming_posts_bucket"),
-    (r"(наименее|худшие|слабые).*(успешн|популярн|пост|публикац)", "underperforming_posts_bucket"),
-    (r"в каком канале|какой канал|какое сообщество|какой источник", "source_comparison"),
-    (r"активн[а-я]* аудитори", "source_comparison"),
-    (r"сравн.*канал|сравн.*сообществ|сравн.*источник", "source_comparison"),
-    (r"подписчик|размер аудитории|размер канала", "source_comparison"),
-    (r"интерес|вовлеч|резонанс", "interest_analysis"),
-    (r"негатив|эмоци|критик|возмущ|раздраж", "negative_analysis"),
-    (r"позитив|нрав|одобр|поддерж", "positive_analysis"),
-    (r"тем[ауыое]|сюжет", "theme_analysis"),
-    (r"сравн|отлич|разниц", "comparison"),
-    (r"причин|почему", "causal_explanation"),
-    (r"поддержива|одобр|хвал|благодар", "support_analysis"),
-    (r"жалоб|претензи|критикуют|ругают|недоволь", "complaints_analysis"),
-    (r"опасени|тревог|боят|страх|риски", "concerns_analysis"),
-    (r"конфликт|спор|поляриз|раздел", "polarization_analysis"),
-    (r"главн|ключев|основн.*вывод", "takeaways_analysis"),
-    (r"за (недел[юьи]|месяц|месяца|квартал|год)", "periodic_report"),
-    (r"какая новость|какой пост|какая публикация|какие новости", "specific_news_answer"),
-]
-
-PROMPT_STOPWORDS.update(
-    {
-        "вызывает",
-        "вызывают",
-        "вызвала",
-        "вызвали",
-        "позитив",
-        "позитивный",
-        "позитивную",
-        "позитивно",
-        "негатив",
-        "негативный",
-        "негативную",
-        "негативно",
-        "эмоция",
-        "эмоции",
-        "реакция",
-        "реакцию",
-        "реакции",
-        "воспринимают",
-        "воспринимает",
-        "поддерживает",
-        "поддерживают",
-        "критикует",
-        "критикуют",
-        "одобряют",
-        "одобряет",
-        "почему",
-    }
-)
-
-GENERIC_PROMPT_SCOPE_TERMS.update(
-    {
-        "вызывает",
-        "вызывают",
-        "вызвала",
-        "вызвали",
-        "позитив",
-        "позитивный",
-        "позитивную",
-        "позитивно",
-        "негатив",
-        "негативный",
-        "негативную",
-        "негативно",
-        "эмоция",
-        "эмоции",
-        "реакция",
-        "реакцию",
-        "реакции",
-        "воспринимают",
-        "воспринимает",
-        "поддерживает",
-        "поддерживают",
-        "критикует",
-        "критикуют",
-        "одобряют",
-        "одобряет",
-        "почему",
-    }
-)
-
-COMMENT_REACTION_TERMS.update(
-    {
-        "позитивный",
-        "позитивную",
-        "позитивно",
-        "негативный",
-        "негативную",
-        "негативно",
-        "воспринимают",
-        "воспринимает",
-        "вызывает",
-        "вызывают",
-        "вызвала",
-        "вызвали",
-        "поддерживает",
-        "поддерживают",
-        "критикует",
-        "критикуют",
-        "одобряют",
-        "одобряет",
-    }
-)
-
-RAW_MODE_PATTERNS[:0] = [
-    (r"позитив\w*.*негатив\w*|негатив\w*.*позитив\w*", "negative_analysis"),
-    (r"позитив\w*.*негатив\w*|негатив\w*.*позитив\w*", "positive_analysis"),
-    (r"вызыва\w*.*позитив\w*|позитив\w*.*реакц\w*|воспринима\w*.*позитив\w*", "positive_analysis"),
-    (r"вызыва\w*.*негатив\w*|негатив\w*.*реакц\w*|воспринима\w*.*негатив\w*", "negative_analysis"),
-]
+PROMPT_STOPWORDS = GENERIC_PROMPT_SCOPE_TERMS | {
+    "больше",
+    "меньше",
+    "самая",
+    "самые",
+    "самый",
+    "самых",
+    "наиболее",
+    "наименее",
+    "максимальный",
+    "минимальный",
+    "вызвала",
+    "вызвали",
+    "вызывают",
+    "вызвал",
+    "думают",
+    "думает",
+    "вызвала",
+    "реально",
+    "нужно",
+    "надо",
+    "если",
+    "только",
+    "поэтому",
+    "среди",
+    "про",
+    "это",
+    "эту",
+    "этой",
+    "этот",
+    "такой",
+    "такие",
+    "прошедший",
+    "месяц",
+    "неделя",
+    "неделю",
+    "месяца",
+    "месяцем",
+}
 
 PRIMARY_MODE_PRIORITY = [
     "excel_export",
     "source_comparison",
     "post_underperformance",
     "post_popularity",
+    "post_sentiment",
+    "theme_underperformance",
+    "theme_popularity",
     "theme_sentiment",
     "theme_interest",
     "topic_report",
 ]
 
+RAW_MODE_PATTERNS: list[tuple[str, str]] = [
+    (r"(excel|эксель|xlsx|таблиц)", "excel_export"),
+    (r"(в каком канале|какой канал|какое сообщество|какой источник)", "source_comparison"),
+    (r"(сравн\w*).*(канал|сообщество|источник)", "source_comparison"),
+    (r"(подписчик|размер аудитории|активная аудитория|активность аудитории)", "source_comparison"),
+    (
+        r"(какая|какой|какие).*(новост|пост|публикац).*(больше|сильн|максим|сам|наибольш|наиболее).*(негатив|критик|жалоб|хуже)",
+        "most_negative_post",
+    ),
+    (r"(негатив|критик|жалоб).*(новост|пост|публикац).*(больше|сильн|максим|сам)", "most_negative_post"),
+    (
+        r"(какая|какой|какие).*(новост|пост|публикац).*(больше|сильн|максим|сам|наибольш|наиболее).*(позитив|положит|поддерж|одобр|лучше)",
+        "most_positive_post",
+    ),
+    (r"(позитив|положит|поддерж|одобр).*(новост|пост|публикац).*(больше|сильн|максим|сам)", "most_positive_post"),
+    (r"(сам\w+\s+обсуждаем|наиболее\s+обсуждаем)", "most_discussed_news"),
+    (r"(больше всего|наибольш\w*|максимальн\w*).*(реакц|лайк)", "most_reacted_post"),
+    (r"(реакц|лайк).*(больше всего|наибольш\w*|максимальн\w*)", "most_reacted_post"),
+    (r"(больше всего|наибольш\w*|максимальн\w*).*(просмотр|охват)", "most_viewed_post"),
+    (r"(просмотр|охват).*(больше всего|наибольш\w*|максимальн\w*)", "most_viewed_post"),
+    (r"(меньше всего|наименьш\w*|минимальн\w*|худш\w*|слаб\w*).*(реакц|лайк)", "least_reacted_post"),
+    (r"(реакц|лайк).*(меньше всего|наименьш\w*|минимальн\w*|худш\w*|слаб\w*)", "least_reacted_post"),
+    (r"(меньше всего|наименьш\w*|минимальн\w*|худш\w*|слаб\w*).*(просмотр|охват)", "least_viewed_post"),
+    (r"(просмотр|охват).*(меньше всего|наименьш\w*|минимальн\w*|худш\w*|слаб\w*)", "least_viewed_post"),
+    (r"(\d+\s*%|\d+\s*процент\w*).*(успешн|популярн).*(пост|публикац)", "successful_posts_bucket"),
+    (r"(верхн\w*).*(пост|публикац).*(процент|%)", "successful_posts_bucket"),
+    (r"(\d+\s*%|\d+\s*процент\w*).*(неуспешн|непопулярн|слаб\w*|худш\w*).*(пост|публикац)", "underperforming_posts_bucket"),
+    (r"(нижн\w*).*(пост|публикац).*(процент|%)", "underperforming_posts_bucket"),
+    (r"(\d+\s+)?(сам\w+\s+)?((?<!не)популярн|успешн|сильн).*(тем|сюжет)", "theme_popularity_ranked"),
+    (r"(тем|сюжет).*((?<!не)популярн|успешн|сильн)", "theme_popularity_ranked"),
+    (r"(\d+\s+)?(сам\w+\s+)?(непопулярн|слаб|худш).*(тем|сюжет)", "theme_underperformance_ranked"),
+    (r"(тем|сюжет).*(непопулярн|слаб|худш)", "theme_underperformance_ranked"),
+    (r"(интерес|вовлеч|резонанс)", "interest_analysis"),
+    (r"(негатив|негативн|критик|возмущ|раздраж)", "negative_analysis"),
+    (r"(позитив|положит|нрав|одобр|поддерж)", "positive_analysis"),
+    (r"(что|как|какие).*(люди|аудитория).*(думают|относятся|воспринимают|реагируют)", "reaction_analysis"),
+    (r"(какую|какая|какие|какой).*(реакц|отношен).*(новост|пост|публикац)", "reaction_analysis"),
+    (r"(тем|сюжет)", "theme_analysis"),
+    (r"(сравн|отлич|разниц)", "comparison"),
+    (r"(причин|почему)", "causal_explanation"),
+    (r"(поддержива|одобр|хвал|благодар)", "support_analysis"),
+    (r"(жалоб|претензи|критикуют|ругают|недоволь)", "complaints_analysis"),
+    (r"(опасени|тревог|боят|страх|риск)", "concerns_analysis"),
+    (r"(конфликт|спор|поляриз|раздел)", "polarization_analysis"),
+    (r"(главн|ключев|основн.*вывод)", "takeaways_analysis"),
+    (r"(за\s+(недел|месяц|квартал|год)|прошедш\w+\s+(недел|месяц|квартал|год))", "periodic_report"),
+    (r"(какая новость|какой пост|какая публикация|какие новости)", "specific_news_answer"),
+]
 
-@dataclass(frozen=True)
+
+@dataclass(slots=True)
 class PromptIntent:
     prompt_text: str
     normalized_text: str
@@ -433,13 +170,21 @@ def normalize_prompt_text(value: str | None) -> str:
     return " ".join((value or "").lower().replace("ё", "е").split())
 
 
-def extract_prompt_focus_terms(prompt_text: str | None) -> list[str]:
+def _tokenize(prompt_text: str | None) -> list[str]:
     prompt = normalize_prompt_text(prompt_text)
     if not prompt:
         return []
+    return re.findall(r"[a-zа-я0-9-]{4,}", prompt)
 
+
+def _titleize_phrase(value: str) -> str:
+    value = value.strip()
+    return value[:1].upper() + value[1:] if value else value
+
+
+def extract_prompt_focus_terms(prompt_text: str | None) -> list[str]:
     seen: list[str] = []
-    for token in re.findall(r"[a-zа-я0-9-]{4,}", prompt):
+    for token in _tokenize(prompt_text):
         if token in PROMPT_STOPWORDS:
             continue
         if token not in seen:
@@ -453,12 +198,22 @@ def extract_prompt_scope_terms(prompt_text: str | None) -> list[str]:
         return []
 
     ordered: list[str] = []
-    for token in re.findall(r"[a-zа-я0-9-]{4,}", prompt):
-        if token in PROMPT_STOPWORDS:
-            continue
+    phrase_patterns = [
+        r"(?:про|о|об|по теме|по запросу)\s+([a-zа-я0-9-]{4,}(?:\s+[a-zа-я0-9-]{4,}){0,4})",
+        r"«([^»]+)»",
+        r"\"([^\"]+)\"",
+    ]
+    for pattern in phrase_patterns:
+        for match in re.finditer(pattern, prompt):
+            value = match.group(1).strip(" .,!?;:-")
+            if value and value not in ordered:
+                ordered.append(value)
+
+    for token in _tokenize(prompt):
         if token not in ordered:
             ordered.append(token)
-    return ordered[:8]
+
+    return [_titleize_phrase(item) for item in ordered[:12]]
 
 
 def infer_prompt_mode(prompt_text: str | None) -> list[str]:
@@ -468,25 +223,69 @@ def infer_prompt_mode(prompt_text: str | None) -> list[str]:
 
     modes: list[str] = []
     for pattern, mode in RAW_MODE_PATTERNS:
-        if re.search(pattern, prompt) and mode not in modes:
+        if re.search(pattern, prompt):
             modes.append(mode)
-    return modes or ["general_analysis"]
+
+    if not modes:
+        modes.append("general_analysis")
+
+    deduped: list[str] = []
+    for mode in modes:
+        if mode not in deduped:
+            deduped.append(mode)
+    return deduped
 
 
 def infer_analysis_axes(prompt_text: str | None) -> list[str]:
-    prompt = normalize_prompt_text(prompt_text)
-    raw_modes = infer_prompt_mode(prompt_text)
-    if not prompt:
-        return ["general"]
-
+    modes = set(infer_prompt_mode(prompt_text))
     axes: list[str] = []
-    if any(term in prompt for term in SOURCE_METRIC_TERMS) or "source_comparison" in raw_modes:
+
+    if "source_comparison" in modes:
         axes.append("source_metrics")
-    if any(term in prompt for term in POST_SCOPE_TERMS) or _has_post_level_mode(raw_modes):
+
+    post_related_modes = {
+        "most_discussed_news",
+        "most_reacted_post",
+        "most_viewed_post",
+        "least_reacted_post",
+        "least_viewed_post",
+        "most_negative_post",
+        "most_positive_post",
+        "successful_posts_bucket",
+        "underperforming_posts_bucket",
+        "theme_popularity_ranked",
+        "theme_underperformance_ranked",
+        "specific_news_answer",
+        "theme_analysis",
+        "interest_analysis",
+        "negative_analysis",
+        "positive_analysis",
+        "reaction_analysis",
+        "general_analysis",
+        "periodic_report",
+    }
+    if modes & post_related_modes:
         axes.append("post_scope")
-    if any(term in prompt for term in COMMENT_REACTION_TERMS) or _has_reaction_mode(raw_modes):
+
+    comment_modes = {
+        "most_negative_post",
+        "most_positive_post",
+        "negative_analysis",
+        "positive_analysis",
+        "reaction_analysis",
+        "support_analysis",
+        "complaints_analysis",
+        "concerns_analysis",
+        "polarization_analysis",
+        "interest_analysis",
+    }
+    if modes & comment_modes:
         axes.append("comment_reaction")
-    return axes or ["general"]
+
+    if not axes:
+        axes.append("general")
+
+    return axes
 
 
 def infer_request_contract(
@@ -494,75 +293,92 @@ def infer_request_contract(
     primary_mode: str | None = None,
     secondary_modes: list[str] | None = None,
 ) -> list[str]:
-    raw_modes = infer_prompt_mode(prompt_text)
     axes = infer_analysis_axes(prompt_text)
+    raw_modes = infer_prompt_mode(prompt_text)
     primary = primary_mode or determine_primary_mode(raw_modes, axes, has_explicit_scope=False)
     secondary = secondary_modes or []
-    instructions: list[str] = []
-    wants_success_buckets = bool({"successful_posts_bucket", "underperforming_posts_bucket"} & set(raw_modes))
 
+    contract: list[str] = []
     if primary == "source_comparison":
-        instructions.extend(
+        contract.extend(
             [
-                "Сравни именно источники между собой, а не отдельные посты.",
-                "Используй число подписчиков, число постов, суммарные просмотры, реакции или лайки, комментарии, репосты и средние метрики на пост.",
-                "Назови лидирующий и слабый источник, если данных хватает хотя бы на базовое сравнение.",
+                "answer_source_first",
+                "compare_channels_not_posts",
+                "use_source_metrics_and_subscribers",
             ]
         )
     elif primary == "post_popularity":
-        instructions.extend(
+        contract.extend(
             [
-                "Определи наиболее успешные или популярные посты по просмотрам и реакциям или лайкам.",
-                "Комментарии используй как вторичный сигнал, а не как главный критерий успеха.",
-                "Если просмотров нет, прямо скажи, что ранжирование построено по реакциям или лайкам, комментариям и репостам.",
+                "name_top_posts",
+                "rank_posts_by_views_and_reactions",
+                "comments_are_secondary",
             ]
         )
     elif primary == "post_underperformance":
-        instructions.extend(
+        contract.extend(
             [
-                "Определи наименее успешные посты по просмотрам и реакциям или лайкам.",
-                "Не путай слабые посты с просто малообсуждаемыми: сначала смотри на просмотры и реакции или лайки.",
-                "Кратко объясни, почему эти публикации оказались внизу.",
+                "name_weakest_posts",
+                "explain_why_posts_underperform",
+                "rank_posts_by_low_views_and_reactions",
+            ]
+        )
+    elif primary == "post_sentiment":
+        contract.extend(
+            [
+                "name_post_with_strongest_reaction",
+                "distinguish_positive_and_negative_post_reaction",
+                "explain_why_audience_responds_this_way",
+            ]
+        )
+    elif primary == "theme_popularity":
+        contract.extend(
+            [
+                "rank_themes_by_post_metrics",
+                "show_posts_inside_each_theme",
+                "explain_why_top_themes_work",
+            ]
+        )
+    elif primary == "theme_underperformance":
+        contract.extend(
+            [
+                "rank_weak_themes_by_post_metrics",
+                "show_posts_inside_each_theme",
+                "explain_why_themes_underperform",
             ]
         )
     elif primary == "theme_sentiment":
-        instructions.extend(
+        contract.extend(
             [
-                "Выдели темы, к которым аудитория относится позитивно или негативно.",
-                "Покажи, какие темы собирают жалобы, одобрение, тревогу или полярную реакцию, если это следует из запроса.",
-                "Не смешивай реакцию на тему с общей популярностью темы.",
+                "name_positive_and_negative_themes",
+                "use_comments_as_reaction_evidence",
+                "explain_reasons_for_sentiment",
             ]
         )
     elif primary == "theme_interest":
-        instructions.extend(
+        contract.extend(
             [
-                "Выдели темы, которые вызывают наибольший интерес или резонанс.",
-                "Опирайся прежде всего на посты и их метрики, а комментарии используй как подтверждение реакции.",
-                "Если тема задана пользователем явно, анализируй только релевантные посты.",
+                "name_themes_with_strongest_attention",
+                "use_post_metrics_and_comments",
             ]
         )
     else:
-        instructions.extend(
+        contract.extend(
             [
-                "Дай содержательный тематический отчет по релевантным постам и комментариям.",
-                "Выделяй только реальные темы постов и новостей, без обрывков фраз и мусорных слов.",
-                "Если данных мало, скажи это прямо, но все равно дай полезный вывод.",
+                "answer_prompt_directly",
+                "stay_on_user_topic",
+                "use_posts_and_comments_as_evidence",
             ]
         )
 
-    normalized_prompt = normalize_prompt_text(prompt_text)
-    if "causal_explanation" in secondary or re.search(r"почему|причин", normalized_prompt):
-        instructions.append(
-            "Обязательно объясни, почему аудитория реагирует именно так: сравни тему, подачу, эмоциональность, оформление, эмодзи, призывность, конфликтность, полезность и новизну."
-        )
-    if "periodic_report" in secondary or re.search(r"за (недел[юьи]|месяц|месяца|квартал|год)", normalized_prompt):
-        instructions.append("Отвечай в рамках указанного периода, а не по всей истории источников.")
-    if "comparison" in secondary and primary != "source_comparison":
-        instructions.append("Покажи различия между лидерами и аутсайдерами, а не только перечисли их.")
-    if wants_success_buckets:
-        instructions.append("Если данных достаточно, выдели верхние и нижние 20% постов как лучшие и слабые группы.")
+    if "causal_explanation" in raw_modes:
+        contract.append("must_explain_why")
+    if "periodic_report" in raw_modes:
+        contract.append("respect_time_period")
+    if secondary:
+        contract.append("use_secondary_modes_as_support")
 
-    return instructions
+    return contract
 
 
 def build_answer_strategy(
@@ -571,88 +387,52 @@ def build_answer_strategy(
     primary_mode: str | None = None,
     secondary_modes: list[str] | None = None,
 ) -> dict:
-    axes = set(analysis_axes or infer_analysis_axes(prompt_text))
+    axes = analysis_axes or infer_analysis_axes(prompt_text)
     raw_modes = infer_prompt_mode(prompt_text)
     primary = primary_mode or determine_primary_mode(raw_modes, list(axes), has_explicit_scope=False)
     secondary = secondary_modes or determine_secondary_modes(raw_modes, primary, has_explicit_scope=False)
-    wants_success_buckets = bool({"successful_posts_bucket", "underperforming_posts_bucket"} & set(raw_modes))
 
-    response_shape = "analysis_note"
-    first_sentence_rule = "Начни с прямого ответа на пользовательский запрос."
+    response_shape = "direct_answer_then_analysis"
+    first_sentence_rule = "answer_the_question_immediately"
     must_cover: list[str] = []
-    metric_priority: list[str] = ["views", "likes_or_reactions", "comments", "reposts"]
+    metric_priority = ["views", "likes_or_reactions", "comments", "reposts"]
 
     if primary == "source_comparison":
-        response_shape = "source_comparison"
-        first_sentence_rule = "Сразу назови источник-лидер и объясни, по каким метрикам он выигрывает."
-        must_cover.extend(
-            [
-                "Назови лидирующий источник.",
-                "Если данных хватает, назови и более слабый источник.",
-                "Покажи суммарные и средние метрики на пост.",
-            ]
-        )
-        metric_priority = [
-            "subscriber_count",
-            "avg_views_per_post",
-            "avg_likes_or_reactions_per_post",
-            "avg_comments_per_post",
-            "avg_reposts_per_post",
-        ]
+        response_shape = "leader_and_laggard_source_then_comparison"
+        must_cover = ["top_source", "weak_source", "source_metrics", "subscriber_context"]
     elif primary == "post_popularity":
-        response_shape = "ranked_posts"
-        first_sentence_rule = "Начни с поста или группы постов, которые набрали лучшие показатели по успеху."
-        must_cover.extend(
-            [
-                "Назови лидеров по успеху.",
-                "Объясни, какие темы и особенности подачи делают их сильнее.",
-            ]
-        )
-        if wants_success_buckets:
-            must_cover.append("Если данных хватает, покажи верхние 20% постов.")
+        response_shape = "top_posts_then_reasons"
+        must_cover = ["leading_posts", "views", "likes_or_reactions", "why_they_win"]
     elif primary == "post_underperformance":
-        response_shape = "ranked_posts"
-        first_sentence_rule = "Начни со слабейших публикаций и коротко объясни, почему они отстают."
-        must_cover.extend(
-            [
-                "Назови аутсайдеров по успеху.",
-                "Сравни их с более успешными публикациями.",
-            ]
-        )
-        if wants_success_buckets:
-            must_cover.append("Если данных хватает, покажи нижние 20% постов.")
+        response_shape = "weak_posts_then_reasons"
+        must_cover = ["weak_posts", "low_metrics", "why_they_lag"]
+    elif primary == "post_sentiment":
+        response_shape = "strongest_reaction_post_then_explanation"
+        must_cover = ["lead_post", "reaction_direction", "relevant_comments", "why"]
+    elif primary == "theme_popularity":
+        response_shape = "top_themes_then_supporting_posts"
+        must_cover = ["top_themes", "leading_posts", "views", "likes_or_reactions", "why_themes_work"]
+    elif primary == "theme_underperformance":
+        response_shape = "weak_themes_then_supporting_posts"
+        must_cover = ["weak_themes", "supporting_posts", "low_metrics", "why_themes_fail"]
     elif primary == "theme_sentiment":
-        response_shape = "theme_map"
-        first_sentence_rule = "Сразу назови темы с наиболее позитивной и наиболее негативной реакцией."
-        must_cover.extend(
-            [
-                "Назови темы, которые вызывают позитив.",
-                "Назови темы, которые вызывают негатив.",
-                "Объясни, почему реакция отличается.",
-            ]
-        )
+        response_shape = "positive_vs_negative_themes"
+        must_cover = ["positive_themes", "negative_themes", "reasons"]
     elif primary == "theme_interest":
-        response_shape = "theme_map"
-        first_sentence_rule = "Сразу назови темы, которые собирают наибольший интерес."
-        must_cover.extend(
-            [
-                "Назови самые интересные темы.",
-                "Покажи, какие метрики подтверждают интерес.",
-                "Если уместно, сравни их с более слабыми темами.",
-            ]
-        )
-    else:
-        must_cover.extend(
-            [
-                "Ответь именно на пользовательский запрос, а не пересказывай общую статистику.",
-                "Привяжи вывод к конкретным постам, темам или источникам.",
-            ]
-        )
+        response_shape = "top_interest_themes"
+        must_cover = ["top_themes", "metrics", "why_interest_is_high"]
+    elif primary == "topic_report":
+        response_shape = "direct_answer_then_thematic_breakdown"
+        must_cover = ["direct_answer", "key_themes", "supporting_evidence"]
 
-    if "source_metrics" in axes and primary != "source_comparison":
-        must_cover.append("Если различия между источниками заметны, кратко зафиксируй их как дополнительный контекст.")
-    if "comment_reaction" in axes and primary not in {"source_comparison", "post_popularity", "post_underperformance"}:
-        must_cover.append("Используй тональность и комментарии как подтверждение того, как аудитория реагирует на темы.")
+    if "causal_explanation" in raw_modes and "why" not in must_cover:
+        must_cover.append("why")
+    if "periodic_report" in raw_modes:
+        must_cover.append("time_period")
+    if "source_metrics" in axes and "source_metrics" not in must_cover and primary != "source_comparison":
+        must_cover.append("source_metrics_if_relevant")
+    if secondary:
+        must_cover.append("secondary_modes_support")
 
     return {
         "primary_mode": primary,
@@ -675,27 +455,32 @@ def build_prompt_intent(prompt_text: str | None, has_explicit_scope: bool = Fals
     secondary_modes = determine_secondary_modes(raw_modes, primary_mode, has_explicit_scope)
     focus_terms = extract_prompt_focus_terms(prompt_text)
     scope_terms = extract_prompt_scope_terms(prompt_text)
-    meaningful_scope_terms = [term for term in scope_terms if term not in GENERIC_PROMPT_SCOPE_TERMS]
-    generic_reaction_pattern = re.search(
-        "(\\u043a\\u0430\\u043a\\u0443\\u044e|\\u043a\\u0430\\u043a\\u0430\\u044f|\\u0447\\u0442\\u043e).*(\\u0440\\u0435\\u0430\\u043a\\u0446|\\u0434\\u0443\\u043c\\u0430\\u044e\\u0442|\\u0432\\u043e\\u0441\\u043f\\u0440\\u0438\\u043d\\u0438\\u043c\\u0430\\u044e\\u0442).*(\\u043d\\u043e\\u0432\\u043e\\u0441\\u0442\\u044c|\\u043f\\u043e\\u0441\\u0442|\\u043f\\u0443\\u0431\\u043b\\u0438\\u043a\\u0430\\u0446)",
-        normalized_text,
+    meaningful_scope_terms = [
+        term
+        for term in scope_terms
+        if normalize_prompt_text(term) not in GENERIC_PROMPT_SCOPE_TERMS
+    ]
+    emotion_only_scope = bool(meaningful_scope_terms) and all(
+        re.search(r"(позитив|негатив|поддерж|одобр|жалоб|критик|интерес|реакц)", normalize_prompt_text(term))
+        for term in meaningful_scope_terms
     )
-    generic_reaction_question = (
-        primary_mode == "theme_sentiment"
-        and not has_explicit_scope
-        and (
-            generic_reaction_pattern is not None
-            or (
-                not focus_terms
-                and not ({"theme_analysis", "theme_interest", "specific_news_answer"} & set(raw_modes))
-            )
+
+    generic_reaction_question = bool(
+        re.search(
+            r"(какую|какая|какие|какой|что).*((реакц|думают|воспринимают|относятся|реагируют|вызывают).*(новост|пост|публикац)|(новост|пост|публикац).*(реакц|думают|воспринимают|относятся|реагируют|вызывают))",
+            normalized_text,
         )
     )
-    generic_scope = not meaningful_scope_terms or primary_mode in {
+
+    generic_scope = not meaningful_scope_terms or emotion_only_scope or primary_mode in {
         "source_comparison",
         "post_popularity",
         "post_underperformance",
+        "post_sentiment",
+        "theme_popularity",
+        "theme_underperformance",
     } or generic_reaction_question
+
     source_only = primary_mode == "source_comparison" and not has_explicit_scope and not meaningful_scope_terms
 
     return PromptIntent(
@@ -717,6 +502,7 @@ def build_prompt_intent(prompt_text: str | None, has_explicit_scope: bool = Fals
 def determine_primary_mode(raw_modes: list[str], analysis_axes: list[str], has_explicit_scope: bool) -> str:
     mode_set = set(raw_modes)
     primary_candidates: list[str] = []
+    has_explicit_post_sentiment = bool({"most_negative_post", "most_positive_post"} & mode_set)
 
     if "excel_export" in mode_set:
         primary_candidates.append("excel_export")
@@ -724,6 +510,13 @@ def determine_primary_mode(raw_modes: list[str], analysis_axes: list[str], has_e
         primary_candidates.append("source_comparison")
     if {"least_reacted_post", "least_viewed_post", "underperforming_posts_bucket"} & mode_set:
         primary_candidates.append("post_underperformance")
+    if {"most_negative_post", "most_positive_post"} & mode_set:
+        primary_candidates.append("post_sentiment")
+    if "theme_underperformance_ranked" in mode_set:
+        primary_candidates.append("theme_underperformance")
+    if "theme_popularity_ranked" in mode_set:
+        primary_candidates.append("theme_popularity")
+
     ranking_modes = {
         "most_discussed_news",
         "most_reacted_post",
@@ -738,9 +531,13 @@ def determine_primary_mode(raw_modes: list[str], analysis_axes: list[str], has_e
         "concerns_analysis",
         "polarization_analysis",
     }
-    if ranking_modes & mode_set or ("specific_news_answer" in mode_set and not (sentiment_modes & mode_set)):
+    if ranking_modes & mode_set or (
+        "specific_news_answer" in mode_set and not (sentiment_modes & mode_set) and not has_explicit_post_sentiment
+    ):
         primary_candidates.append("post_popularity")
-    if sentiment_modes & mode_set:
+    if sentiment_modes & mode_set and not has_explicit_post_sentiment:
+        primary_candidates.append("theme_sentiment")
+    if "reaction_analysis" in mode_set and not has_explicit_post_sentiment:
         primary_candidates.append("theme_sentiment")
     if "interest_analysis" in mode_set:
         primary_candidates.append("theme_interest")
@@ -757,7 +554,19 @@ def determine_primary_mode(raw_modes: list[str], analysis_axes: list[str], has_e
         else:
             primary_candidates.append("topic_report")
 
-    if any(mode in primary_candidates for mode in {"source_comparison", "post_popularity", "post_underperformance", "theme_sentiment", "theme_interest"}):
+    if any(
+        mode in primary_candidates
+        for mode in {
+            "source_comparison",
+            "post_popularity",
+            "post_underperformance",
+            "post_sentiment",
+            "theme_popularity",
+            "theme_underperformance",
+            "theme_sentiment",
+            "theme_interest",
+        }
+    ):
         primary_candidates = [mode for mode in primary_candidates if mode != "topic_report"]
 
     ordered = [mode for mode in PRIMARY_MODE_PRIORITY if mode in primary_candidates]
@@ -788,9 +597,16 @@ def determine_secondary_modes(raw_modes: list[str], primary_mode: str, has_expli
         "underperforming_posts_bucket",
     } & raw_set:
         secondary.append("post_underperformance")
+    if primary_mode != "post_sentiment" and {"most_negative_post", "most_positive_post"} & raw_set:
+        secondary.append("post_sentiment")
+    if primary_mode != "theme_popularity" and "theme_popularity_ranked" in raw_set:
+        secondary.append("theme_popularity")
+    if primary_mode != "theme_underperformance" and "theme_underperformance_ranked" in raw_set:
+        secondary.append("theme_underperformance")
     if primary_mode != "theme_sentiment" and {
         "negative_analysis",
         "positive_analysis",
+        "reaction_analysis",
         "support_analysis",
         "complaints_analysis",
         "concerns_analysis",
@@ -815,42 +631,3 @@ def determine_secondary_modes(raw_modes: list[str], primary_mode: str, has_expli
         if mode not in deduped:
             deduped.append(mode)
     return deduped
-
-
-def _has_post_level_mode(raw_modes: list[str]) -> bool:
-    return bool(
-        {
-            "most_discussed_news",
-            "most_reacted_post",
-            "most_viewed_post",
-            "least_reacted_post",
-            "least_viewed_post",
-            "successful_posts_bucket",
-            "underperforming_posts_bucket",
-            "specific_news_answer",
-            "theme_analysis",
-        }
-        & set(raw_modes)
-    )
-
-
-def _has_reaction_mode(raw_modes: list[str]) -> bool:
-    return bool(
-        {
-            "negative_analysis",
-            "positive_analysis",
-            "support_analysis",
-            "complaints_analysis",
-            "concerns_analysis",
-            "polarization_analysis",
-            "interest_analysis",
-        }
-        & set(raw_modes)
-    )
-
-
-def _titleize_phrase(value: str) -> str:
-    cleaned = (value or "").strip(" -_.,;:!?")
-    if not cleaned:
-        return ""
-    return cleaned[0].upper() + cleaned[1:]

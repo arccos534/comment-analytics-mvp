@@ -41,8 +41,11 @@ export type AnalysisMode =
   | "source_comparison"
   | "post_popularity"
   | "post_underperformance"
+  | "post_sentiment"
   | "theme_sentiment"
   | "theme_interest"
+  | "theme_popularity"
+  | "theme_underperformance"
   | "topic_report"
   | "excel_export"
   | "mixed";
@@ -135,6 +138,8 @@ export interface ReportSummary {
     level: "high" | "medium" | "low";
     reason: string;
   };
+  top_positive_posts?: ReportPost[];
+  top_negative_posts?: ReportPost[];
   theme_reaction_map?: ThemeReactionItem[];
   focus_evidence?: FocusEvidenceItem[];
 }
