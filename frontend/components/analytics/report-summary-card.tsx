@@ -23,6 +23,7 @@ export function ReportSummaryCard({
   stats,
   takeaways,
   analysisMode,
+  takeawayLinks = [],
 }: {
   summaryText: string | null;
   meta: {
@@ -37,6 +38,10 @@ export function ReportSummaryCard({
   };
   takeaways?: string[];
   analysisMode?: AnalysisMode;
+  takeawayLinks?: Array<{
+    label: string;
+    url: string;
+  }>;
 }) {
   return (
     <Card className="border-white/10 bg-card/70 backdrop-blur">
@@ -69,6 +74,21 @@ export function ReportSummaryCard({
                 </div>
               ))}
             </div>
+            {takeawayLinks.length ? (
+              <div className="flex flex-wrap gap-2 pt-1">
+                {takeawayLinks.map((item) => (
+                  <a
+                    key={`${item.label}-${item.url}`}
+                    href={item.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex rounded-full border border-primary/20 bg-primary/10 px-3 py-1 text-xs font-medium text-primary transition hover:bg-primary/15"
+                  >
+                    {item.label}
+                  </a>
+                ))}
+              </div>
+            ) : null}
           </div>
         ) : null}
 

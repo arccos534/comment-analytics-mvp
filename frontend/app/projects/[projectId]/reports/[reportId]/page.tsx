@@ -33,6 +33,11 @@ type ThemeCardConfig = {
   emptyText?: string;
 };
 
+type TakeawayLink = {
+  label: string;
+  url: string;
+};
+
 function getAnalysisMode(report: ReportSnapshot["report_json"]): AnalysisMode {
   return report.summary.primary_mode || report.summary.analysis_mode || "topic_report";
 }
@@ -110,6 +115,35 @@ function getThemeCardConfig(report: ReportSnapshot["report_json"], mode: Analysi
     items: baseItems,
     emptyText: "Для текущей выборки карта тем и реакции пока не сформировалась.",
   };
+}
+
+function getTakeawayLinks(report: ReportSnapshot["report_json"], mode: AnalysisMode): TakeawayLink[] {
+  const promptModes = new Set(report.summary.prompt_modes || []);
+  const links: TakeawayLink[] = [];
+
+  const pushUniqueLink = (label: string, posts: ReportPost[] | undefined) => {
+    const target = (posts || []).find((item) => item.post_url?.trim());
+    const url = target?.post_url?.trim();
+    if (!url || links.some((item) => item.url === url)) {
+      return;
+    }
+    links.push({ label, url });
+  };
+
+  if (mode === "post_sentiment") {
+    const requestedNegative = promptModes.has("most_negative_post");
+    const requestedPositive = promptModes.has("most_positive_post");
+    const showBoth = !requestedNegative && !requestedPositive;
+
+    if (requestedNegative || showBoth) {
+      pushUniqueLink(showBoth ? "Negative post" : "Source post", report.summary.top_negative_posts);
+    }
+    if (requestedPositive || showBoth) {
+      pushUniqueLink(showBoth ? "Positive post" : "Source post", report.summary.top_positive_posts);
+    }
+  }
+
+  return links.length === 1 ? [{ ...links[0], label: "Source post" }] : links;
 }
 
 function getPostSections(report: ReportSnapshot["report_json"], mode: AnalysisMode): PostSection[] {
@@ -300,6 +334,7 @@ export default function ReportPage({ params }: { params: { projectId: string; re
   const postSections = getPostSections(report, analysisMode);
   const comparisonItems = report.sources?.comparison || [];
   const themeCard = getThemeCardConfig(report, analysisMode);
+  const takeawayLinks = getTakeawayLinks(report, analysisMode);
   const hasThemes = themeCard.items.length > 0;
   const hasComments = report.stats.analyzed_comments > 0;
 
@@ -320,6 +355,7 @@ export default function ReportPage({ params }: { params: { projectId: string; re
           stats={report.stats}
           takeaways={report.summary.takeaways || []}
           analysisMode={analysisMode}
+          takeawayLinks={takeawayLinks}
         />
         {isSourceMode ? <SourceComparisonCard items={comparisonItems} /> : null}
       </div>
