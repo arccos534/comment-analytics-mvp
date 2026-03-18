@@ -3,7 +3,12 @@ from __future__ import annotations
 from collections import Counter, defaultdict
 from math import ceil
 
-from app.analytics.prompt_intent import extract_requested_count, extract_requested_percentage, infer_prompt_mode
+from app.analytics.prompt_intent import (
+    extract_requested_count,
+    extract_requested_percentage,
+    infer_prompt_mode,
+    infer_source_metric,
+)
 
 
 class ReportAggregator:
@@ -59,6 +64,7 @@ class ReportAggregator:
         scoped_posts = scoped_posts or []
         prompt_modes = set(infer_prompt_mode(run.prompt_text))
         requested_item_count = extract_requested_count(run.prompt_text)
+        requested_source_metric = infer_source_metric(run.prompt_text) if "source_comparison" in prompt_modes else None
         requested_success_bucket_percent = (
             extract_requested_percentage(run.prompt_text)
             if {"successful_posts_bucket", "underperforming_posts_bucket"} & prompt_modes
@@ -312,15 +318,59 @@ class ReportAggregator:
                     "score": score,
                 }
             )
+
+        def source_sort_key(item: dict) -> tuple[float, float, float, float, int]:
+            if requested_source_metric == "subscribers":
+                return (
+                    int(item.get("subscriber_count", 0) or 0),
+                    float(item.get("avg_views_per_post", 0) or 0),
+                    float(item.get("avg_likes_per_post", 0) or 0),
+                    float(item.get("avg_comments_per_post", 0) or 0),
+                    float(item.get("avg_reposts_per_post", 0) or 0),
+                )
+            if requested_source_metric == "views":
+                return (
+                    float(item.get("avg_views_per_post", 0) or 0),
+                    int(item.get("subscriber_count", 0) or 0),
+                    float(item.get("avg_likes_per_post", 0) or 0),
+                    float(item.get("avg_comments_per_post", 0) or 0),
+                    float(item.get("avg_reposts_per_post", 0) or 0),
+                )
+            if requested_source_metric == "likes":
+                return (
+                    float(item.get("avg_likes_per_post", 0) or 0),
+                    float(item.get("avg_views_per_post", 0) or 0),
+                    float(item.get("avg_comments_per_post", 0) or 0),
+                    float(item.get("avg_reposts_per_post", 0) or 0),
+                    int(item.get("subscriber_count", 0) or 0),
+                )
+            if requested_source_metric == "comments":
+                return (
+                    float(item.get("avg_comments_per_post", 0) or 0),
+                    float(item.get("avg_views_per_post", 0) or 0),
+                    float(item.get("avg_likes_per_post", 0) or 0),
+                    float(item.get("avg_reposts_per_post", 0) or 0),
+                    int(item.get("subscriber_count", 0) or 0),
+                )
+            if requested_source_metric == "reposts":
+                return (
+                    float(item.get("avg_reposts_per_post", 0) or 0),
+                    float(item.get("avg_views_per_post", 0) or 0),
+                    float(item.get("avg_likes_per_post", 0) or 0),
+                    float(item.get("avg_comments_per_post", 0) or 0),
+                    int(item.get("subscriber_count", 0) or 0),
+                )
+            return (
+                float(item.get("avg_views_per_post", 0) or 0),
+                float(item.get("avg_likes_per_post", 0) or 0),
+                float(item.get("avg_comments_per_post", 0) or 0),
+                float(item.get("avg_reposts_per_post", 0) or 0),
+                int(item.get("subscriber_count", 0) or 0),
+            )
+
         source_items = sorted(
             source_items,
-            key=lambda item: (
-                item["avg_views_per_post"],
-                item["avg_likes_per_post"],
-                item["avg_comments_per_post"],
-                item["avg_reposts_per_post"],
-                item["subscriber_count"] or 0,
-            ),
+            key=source_sort_key,
             reverse=True,
         )
 
@@ -357,6 +407,7 @@ class ReportAggregator:
                 "platforms": filters.get("platforms", []),
                 "source_ids": filters.get("source_ids", []),
                 "requested_item_count": requested_item_count,
+                "requested_source_metric": requested_source_metric,
                 "requested_success_bucket_percent": requested_success_bucket_percent,
                 "analysis_mode_override": (run.filters_json or {}).get("analysis_mode_override"),
             },

@@ -163,6 +163,7 @@ export interface ReportSnapshot {
       post_keywords?: string[];
       requested_success_bucket_percent?: number | null;
       requested_item_count?: number | null;
+      requested_source_metric?: string | null;
       period_from: string | null;
       period_to: string | null;
       platforms: string[];

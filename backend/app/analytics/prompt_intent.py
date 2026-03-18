@@ -197,6 +197,39 @@ PRIMARY_MODE_REQUIRED_AXES: dict[str, list[str]] = {
     "mixed": ["post_scope"],
 }
 
+REQUESTED_COUNT_WORDS: dict[str, int] = {
+    "один": 1,
+    "одна": 1,
+    "одно": 1,
+    "одну": 1,
+    "одного": 1,
+    "два": 2,
+    "две": 2,
+    "двух": 2,
+    "три": 3,
+    "трех": 3,
+    "трёх": 3,
+    "четыре": 4,
+    "четырех": 4,
+    "четырёх": 4,
+    "пять": 5,
+    "пяти": 5,
+    "шесть": 6,
+    "шести": 6,
+    "семь": 7,
+    "семи": 7,
+    "восемь": 8,
+    "восьми": 8,
+    "девять": 9,
+    "девяти": 9,
+    "десять": 10,
+    "десяти": 10,
+}
+
+REQUESTED_COUNT_WORD_PATTERN = "|".join(
+    sorted((re.escape(token) for token in REQUESTED_COUNT_WORDS), key=len, reverse=True)
+)
+
 
 def normalize_prompt_text(value: str | None) -> str:
     return " ".join((value or "").lower().replace("ё", "е").split())
@@ -286,7 +319,40 @@ def extract_requested_count(prompt_text: str | None) -> int | None:
         value = int(match.group(1))
         if 0 < value <= 50:
             return value
+
+    word_patterns = [
+        rf"(?:топ|top)\s*({REQUESTED_COUNT_WORD_PATTERN})\b",
+        rf"выдел(?:и|ить)?[^a-zа-я0-9]{{0,24}}({REQUESTED_COUNT_WORD_PATTERN})\b",
+        rf"покажи[^a-zа-я0-9]{{0,24}}({REQUESTED_COUNT_WORD_PATTERN})\b",
+        rf"найди[^a-zа-я0-9]{{0,24}}({REQUESTED_COUNT_WORD_PATTERN})\b",
+        rf"({REQUESTED_COUNT_WORD_PATTERN})\s*(?:сам\w+\s+)?(?:пост\w*|тем\w*|сюжет\w*|источник\w*|канал\w*)",
+    ]
+    for pattern in word_patterns:
+        match = re.search(pattern, prompt)
+        if not match:
+            continue
+        value = REQUESTED_COUNT_WORDS.get(match.group(1))
+        if value and 0 < value <= 50:
+            return value
     return None
+
+
+def infer_source_metric(prompt_text: str | None) -> str:
+    prompt = normalize_prompt_text(prompt_text)
+    if not prompt:
+        return "engagement"
+
+    if re.search(r"(подписчик|подписчиков|подписчикам|размер аудитории|по аудитории)", prompt):
+        return "subscribers"
+    if re.search(r"(просмотр|охват)", prompt):
+        return "views"
+    if re.search(r"(лайк|реакц)", prompt):
+        return "likes"
+    if re.search(r"(комментар)", prompt):
+        return "comments"
+    if re.search(r"(репост)", prompt):
+        return "reposts"
+    return "engagement"
 
 
 def infer_prompt_mode(prompt_text: str | None) -> list[str]:

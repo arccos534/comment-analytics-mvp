@@ -14,6 +14,7 @@ from app.analytics.prompt_intent import (
     build_prompt_intent as build_shared_prompt_intent,
     extract_requested_count,
     extract_prompt_focus_terms as extract_shared_prompt_focus_terms,
+    infer_source_metric,
 )
 from app.core.config import get_settings
 
@@ -1872,7 +1873,7 @@ class SummaryGenerator:
     def _default_display_count(self, primary_mode: str, prompt_modes: set[str] | list[str]) -> int:
         mode_set = set(prompt_modes or [])
         if primary_mode == "source_comparison":
-            return 5
+            return 3
         if primary_mode in {"theme_sentiment", "theme_interest", "theme_popularity", "theme_underperformance"}:
             return 5
         if primary_mode == "mixed":
@@ -1996,6 +1997,53 @@ class SummaryGenerator:
             float(source.get("avg_reposts_per_post", 0) or 0),
             int(source.get("subscriber_count", 0) or 0),
         )
+
+    def _source_rank_key(self, source: dict, metric: str) -> tuple[float, float, float, float, int]:
+        if metric == "subscribers":
+            return (
+                int(source.get("subscriber_count", 0) or 0),
+                float(source.get("avg_views_per_post", 0) or 0),
+                float(source.get("avg_likes_per_post", 0) or 0),
+                float(source.get("avg_comments_per_post", 0) or 0),
+                float(source.get("avg_reposts_per_post", 0) or 0),
+            )
+        if metric == "views":
+            return (
+                float(source.get("avg_views_per_post", 0) or 0),
+                int(source.get("subscriber_count", 0) or 0),
+                float(source.get("avg_likes_per_post", 0) or 0),
+                float(source.get("avg_comments_per_post", 0) or 0),
+                float(source.get("avg_reposts_per_post", 0) or 0),
+            )
+        if metric == "likes":
+            return (
+                float(source.get("avg_likes_per_post", 0) or 0),
+                float(source.get("avg_views_per_post", 0) or 0),
+                float(source.get("avg_comments_per_post", 0) or 0),
+                float(source.get("avg_reposts_per_post", 0) or 0),
+                int(source.get("subscriber_count", 0) or 0),
+            )
+        if metric == "comments":
+            return (
+                float(source.get("avg_comments_per_post", 0) or 0),
+                float(source.get("avg_views_per_post", 0) or 0),
+                float(source.get("avg_likes_per_post", 0) or 0),
+                float(source.get("avg_reposts_per_post", 0) or 0),
+                int(source.get("subscriber_count", 0) or 0),
+            )
+        if metric == "reposts":
+            return (
+                float(source.get("avg_reposts_per_post", 0) or 0),
+                float(source.get("avg_views_per_post", 0) or 0),
+                float(source.get("avg_likes_per_post", 0) or 0),
+                float(source.get("avg_comments_per_post", 0) or 0),
+                int(source.get("subscriber_count", 0) or 0),
+            )
+        return self._source_success_key(source)
+
+    def _sort_sources_for_prompt(self, sources: list[dict], prompt_text: str | None) -> list[dict]:
+        metric = infer_source_metric(prompt_text)
+        return sorted(sources, key=lambda source: self._source_rank_key(source, metric), reverse=True)
 
     def _format_post_metrics(self, post: dict, priority: str = "success") -> str:
         metric_label = self._engagement_metric_label(post)
@@ -2541,7 +2589,7 @@ class SummaryGenerator:
             )
 
         if primary_mode == "source_comparison" and source_comparison:
-            ranked_sources = sorted(source_comparison, key=self._source_success_key, reverse=True)
+            ranked_sources = self._sort_sources_for_prompt(source_comparison, request.get("prompt_text"))
             lead_source = ranked_sources[0]
             takeaways.append(
                 f"По совокупности метрик лидирует источник «{lead_source.get('source_title') or lead_source.get('source_url') or 'без названия'}»: "
@@ -2769,7 +2817,7 @@ class SummaryGenerator:
         paragraphs: list[str] = []
 
         if primary_mode == "source_comparison" and source_comparison:
-            ranked_sources = sorted(source_comparison, key=self._source_success_key, reverse=True)
+            ranked_sources = self._sort_sources_for_prompt(source_comparison, request.get("prompt_text"))
             lead = ranked_sources[0]
             direct = (
                 f"Лидирующим источником по активности аудитории выглядит «{lead.get('source_title') or lead.get('source_url') or 'без названия'}». "
@@ -2999,7 +3047,7 @@ class SummaryGenerator:
 
         matched_posts = payload.get("matched_posts", []) or []
         focus_evidence = payload.get("focus_evidence", []) or []
-        source_comparison = sorted(payload.get("source_comparison_map", []) or [], key=self._source_success_key, reverse=True)
+        source_comparison = self._sort_sources_for_prompt(payload.get("source_comparison_map", []) or [], request.get("prompt_text"))
         top_discussed_posts = payload.get("top_discussed_posts", []) or []
         top_reacted_posts = payload.get("top_reacted_posts", []) or []
         top_positive_posts = payload.get("top_positive_posts", []) or []
@@ -3214,7 +3262,7 @@ class SummaryGenerator:
         theme_items = self._limit_items(theme_map, requested_item_count, default_item_count)
         matched_posts = payload.get("matched_posts", []) or []
         focus_evidence = payload.get("focus_evidence", []) or []
-        source_comparison = sorted(payload.get("source_comparison_map", []) or [], key=self._source_success_key, reverse=True)
+        source_comparison = self._sort_sources_for_prompt(payload.get("source_comparison_map", []) or [], request.get("prompt_text"))
         top_discussed_posts = payload.get("top_discussed_posts", []) or []
         top_reacted_posts = payload.get("top_reacted_posts", []) or []
         top_positive_posts = payload.get("top_positive_posts", []) or []

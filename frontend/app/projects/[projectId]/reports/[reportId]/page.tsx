@@ -21,9 +21,42 @@ import {
 import { Card, CardContent } from "@/components/ui/card";
 import { Select } from "@/components/ui/select";
 import { useAnalysisRun, useReport } from "@/hooks/use-analysis";
-import { AnalysisMode, ReportComment, ReportPost, ReportSnapshot, ThemeReactionItem } from "@/types/analytics";
+import { AnalysisMode, ReportComment, ReportPost, ReportSnapshot, SourceComparisonItem, ThemeReactionItem } from "@/types/analytics";
 
 const DISPLAY_OPTIONS = [3, 5, 10, 20];
+
+const REQUESTED_COUNT_WORDS: Record<string, number> = {
+  один: 1,
+  одна: 1,
+  одно: 1,
+  одну: 1,
+  одного: 1,
+  два: 2,
+  две: 2,
+  двух: 2,
+  три: 3,
+  трех: 3,
+  "трёх": 3,
+  четыре: 4,
+  четырех: 4,
+  "четырёх": 4,
+  пять: 5,
+  пяти: 5,
+  шесть: 6,
+  шести: 6,
+  семь: 7,
+  семи: 7,
+  восемь: 8,
+  восьми: 8,
+  девять: 9,
+  девяти: 9,
+  десять: 10,
+  десяти: 10,
+};
+
+const REQUESTED_COUNT_WORD_PATTERN = Object.keys(REQUESTED_COUNT_WORDS)
+  .sort((left, right) => right.length - left.length)
+  .join("|");
 
 type PostSection = {
   title: string;
@@ -76,6 +109,24 @@ function parseRequestedCount(promptText?: string | null): number | null {
       return parsed;
     }
   }
+
+  const wordPatterns = [
+    new RegExp(`(?:топ|top)\\s*(${REQUESTED_COUNT_WORD_PATTERN})\\b`, "i"),
+    new RegExp(`выдел(?:и|ить)?[^a-zа-я0-9]{0,24}(${REQUESTED_COUNT_WORD_PATTERN})\\b`, "i"),
+    new RegExp(`покажи[^a-zа-я0-9]{0,24}(${REQUESTED_COUNT_WORD_PATTERN})\\b`, "i"),
+    new RegExp(`найди[^a-zа-я0-9]{0,24}(${REQUESTED_COUNT_WORD_PATTERN})\\b`, "i"),
+    new RegExp(`(${REQUESTED_COUNT_WORD_PATTERN})\\s*(?:сам\\w+\\s+)?(?:тем|постов|сюжетов|источников|каналов)`, "i"),
+  ];
+  for (const pattern of wordPatterns) {
+    const match = text.match(pattern);
+    if (!match) {
+      continue;
+    }
+    const parsed = REQUESTED_COUNT_WORDS[match[1]];
+    if (Number.isFinite(parsed) && parsed > 0) {
+      return parsed;
+    }
+  }
   return null;
 }
 
@@ -90,7 +141,7 @@ function getRequestedCount(report: ReportSnapshot["report_json"]): number | null
 function getDefaultDisplayCount(mode: AnalysisMode): number {
   switch (mode) {
     case "source_comparison":
-      return 5;
+      return 3;
     case "theme_sentiment":
     case "theme_interest":
     case "theme_popularity":
@@ -105,6 +156,91 @@ function getDefaultDisplayCount(mode: AnalysisMode): number {
 
 function getDisplayCount(report: ReportSnapshot["report_json"], mode: AnalysisMode): number {
   return getRequestedCount(report) || getDefaultDisplayCount(mode);
+}
+
+function getRequestedSourceMetric(report: ReportSnapshot["report_json"]): string {
+  return String(report.meta.requested_source_metric || "engagement");
+}
+
+function getSourceComparisonSortValue(item: SourceComparisonItem, metric: string) {
+  switch (metric) {
+    case "subscribers":
+      return [
+        Number(item.subscriber_count || 0),
+        Number(item.avg_views_per_post || 0),
+        Number(item.avg_likes_per_post || 0),
+        Number(item.avg_comments_per_post || 0),
+        Number(item.avg_reposts_per_post || 0),
+      ];
+    case "views":
+      return [
+        Number(item.avg_views_per_post || 0),
+        Number(item.subscriber_count || 0),
+        Number(item.avg_likes_per_post || 0),
+        Number(item.avg_comments_per_post || 0),
+        Number(item.avg_reposts_per_post || 0),
+      ];
+    case "likes":
+      return [
+        Number(item.avg_likes_per_post || 0),
+        Number(item.avg_views_per_post || 0),
+        Number(item.avg_comments_per_post || 0),
+        Number(item.avg_reposts_per_post || 0),
+        Number(item.subscriber_count || 0),
+      ];
+    case "comments":
+      return [
+        Number(item.avg_comments_per_post || 0),
+        Number(item.avg_views_per_post || 0),
+        Number(item.avg_likes_per_post || 0),
+        Number(item.avg_reposts_per_post || 0),
+        Number(item.subscriber_count || 0),
+      ];
+    case "reposts":
+      return [
+        Number(item.avg_reposts_per_post || 0),
+        Number(item.avg_views_per_post || 0),
+        Number(item.avg_likes_per_post || 0),
+        Number(item.avg_comments_per_post || 0),
+        Number(item.subscriber_count || 0),
+      ];
+    default:
+      return [
+        Number(item.avg_views_per_post || 0),
+        Number(item.avg_likes_per_post || 0),
+        Number(item.avg_comments_per_post || 0),
+        Number(item.avg_reposts_per_post || 0),
+        Number(item.subscriber_count || 0),
+      ];
+  }
+}
+
+function sortSourceComparisonItems(items: SourceComparisonItem[], metric: string) {
+  return [...(items || [])].sort((left, right) => {
+    const leftValues = getSourceComparisonSortValue(left, metric);
+    const rightValues = getSourceComparisonSortValue(right, metric);
+    for (let index = 0; index < rightValues.length; index += 1) {
+      const delta = rightValues[index] - leftValues[index];
+      if (delta !== 0) {
+        return delta;
+      }
+    }
+    return 0;
+  });
+}
+
+function getSourceComparisonTitle(report: ReportSnapshot["report_json"], count: number): string {
+  const safeCount = Math.max(count, getDisplayCount(report, "source_comparison"));
+  const metric = getRequestedSourceMetric(report);
+  const metricLabelMap: Record<string, string> = {
+    subscribers: "по подписчикам",
+    views: "по просмотрам",
+    likes: "по лайкам или реакциям",
+    comments: "по комментариям",
+    reposts: "по репостам",
+    engagement: "по совокупности метрик",
+  };
+  return `Топ ${safeCount} источников ${metricLabelMap[metric] || "по совокупности метрик"}`;
 }
 
 function getThemeSuccessScore(item: ThemeReactionItem): number {
@@ -534,7 +670,11 @@ export default function ReportPage({ params }: { params: { projectId: string; re
   const hasComments = report.stats.analyzed_comments > 0;
   const postSections = getPostSections(report, analysisMode).filter((section) => section.posts.length > 0);
   const commentSections = getCommentSections(report, analysisMode);
-  const comparisonItems = (report.sources?.comparison || []).slice(0, getDisplayCount(report, analysisMode));
+  const sourceMetric = getRequestedSourceMetric(report);
+  const comparisonItems = sortSourceComparisonItems(report.sources?.comparison || [], sourceMetric).slice(
+    0,
+    getDisplayCount(report, analysisMode)
+  );
   const takeawayLinks = getTakeawayLinks(report, analysisMode);
 
   const showSentimentCard = analysisMode === "topic_report" && hasComments;
@@ -563,7 +703,7 @@ export default function ReportPage({ params }: { params: { projectId: string; re
           analysisMode={analysisMode}
           takeawayLinks={takeawayLinks}
         />
-        {isSourceMode ? <SourceComparisonCard items={comparisonItems} /> : null}
+        {isSourceMode ? <SourceComparisonCard items={comparisonItems} title={getSourceComparisonTitle(report, comparisonItems.length)} /> : null}
       </div>
 
       {showThemeCard ? (
