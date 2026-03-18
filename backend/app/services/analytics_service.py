@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import re
 from uuid import UUID
@@ -222,6 +224,11 @@ class AnalyticsService:
         return self.projects.exists(project_id)
 
     def create_and_enqueue_run(self, project_id: UUID, payload: AnalysisCreateRequest):
+        request_signature = self._build_request_signature(project_id, payload)
+        existing_run = self.find_matching_active_run(project_id, payload, request_signature=request_signature)
+        if existing_run:
+            return existing_run
+
         run = AnalysisRun(
             project_id=project_id,
             prompt_text=payload.prompt_text,
@@ -233,6 +240,7 @@ class AnalyticsService:
                 "platforms": [platform.value for platform in payload.platforms],
                 "source_ids": [str(source_id) for source_id in payload.source_ids],
                 "analysis_mode_override": (payload.analysis_mode_override or "").strip() or None,
+                "request_signature": request_signature,
             },
             status=AnalysisRunStatusEnum.pending,
         )
@@ -252,6 +260,19 @@ class AnalyticsService:
 
     def get_run(self, analysis_run_id: UUID):
         return self.analysis_repo.get_run(analysis_run_id)
+
+    def find_matching_active_run(
+        self,
+        project_id: UUID,
+        payload: AnalysisCreateRequest,
+        *,
+        request_signature: str | None = None,
+    ) -> AnalysisRun | None:
+        expected_signature = request_signature or self._build_request_signature(project_id, payload)
+        for run in self.analysis_repo.list_active_runs(project_id):
+            if self._extract_run_signature(run) == expected_signature:
+                return run
+        return None
 
     def get_report(self, analysis_run_id: UUID):
         return self.analysis_repo.get_report(analysis_run_id)
@@ -326,6 +347,55 @@ class AnalyticsService:
 
     def _normalize_term(self, value: str) -> str:
         return " ".join((value or "").lower().replace("ё", "е").split())
+
+    def _normalize_payload_keywords(self, keywords: list[str] | None) -> list[str]:
+        normalized: list[str] = []
+        for keyword in keywords or []:
+            cleaned = self._normalize_term(keyword)
+            if cleaned and cleaned not in normalized:
+                normalized.append(cleaned)
+        return sorted(normalized)
+
+    def _normalize_payload_platforms(self, platforms: list[str] | None) -> list[str]:
+        return sorted({(platform or "").strip().lower() for platform in platforms or [] if (platform or "").strip()})
+
+    def _normalize_payload_source_ids(self, source_ids: list[str] | None) -> list[str]:
+        return sorted({str(source_id).strip() for source_id in source_ids or [] if str(source_id).strip()})
+
+    def _build_request_signature(self, project_id: UUID, payload: AnalysisCreateRequest) -> str:
+        payload_dict = {
+            "project_id": str(project_id),
+            "prompt_text": self._normalize_term(payload.prompt_text),
+            "theme": self._normalize_term(payload.theme or ""),
+            "keywords": self._normalize_payload_keywords(payload.keywords),
+            "analysis_mode_override": self._normalize_term(payload.analysis_mode_override or ""),
+            "period_from": payload.period_from.isoformat() if payload.period_from else "",
+            "period_to": payload.period_to.isoformat() if payload.period_to else "",
+            "platforms": self._normalize_payload_platforms([platform.value for platform in payload.platforms]),
+            "source_ids": self._normalize_payload_source_ids([str(source_id) for source_id in payload.source_ids]),
+        }
+        serialized = json.dumps(payload_dict, ensure_ascii=False, sort_keys=True)
+        return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+    def _extract_run_signature(self, run: AnalysisRun) -> str:
+        filters = run.filters_json or {}
+        existing_signature = (filters.get("request_signature") or "").strip()
+        if existing_signature:
+            return existing_signature
+
+        payload_dict = {
+            "project_id": str(run.project_id),
+            "prompt_text": self._normalize_term(run.prompt_text),
+            "theme": self._normalize_term(run.theme or ""),
+            "keywords": self._normalize_payload_keywords(run.keywords_json or []),
+            "analysis_mode_override": self._normalize_term(filters.get("analysis_mode_override") or ""),
+            "period_from": run.period_from.isoformat() if run.period_from else "",
+            "period_to": run.period_to.isoformat() if run.period_to else "",
+            "platforms": self._normalize_payload_platforms(filters.get("platforms") or []),
+            "source_ids": self._normalize_payload_source_ids(filters.get("source_ids") or []),
+        }
+        serialized = json.dumps(payload_dict, ensure_ascii=False, sort_keys=True)
+        return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
 
     def _stem_token(self, token: str) -> str:
         normalized = self._normalize_term(token)

@@ -22,6 +22,18 @@ def run_analysis(
     return service.create_and_enqueue_run(project_id, payload)
 
 
+@router.post("/projects/{project_id}/active-analysis-run", response_model=AnalysisRunResponse | None)
+def find_active_analysis_run(
+    project_id: UUID,
+    payload: AnalysisCreateRequest,
+    db: Session = Depends(get_db),
+) -> AnalysisRunResponse | None:
+    service = AnalyticsService(db)
+    if not service.project_exists(project_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+    return service.find_matching_active_run(project_id, payload)
+
+
 @router.get("/analysis-runs/{analysis_run_id}", response_model=AnalysisRunResponse)
 def get_analysis_run(analysis_run_id: UUID, db: Session = Depends(get_db)) -> AnalysisRunResponse:
     run = AnalyticsService(db).get_run(analysis_run_id)

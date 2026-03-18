@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { ChevronDown, ChevronUp } from "lucide-react";
 
@@ -13,6 +13,11 @@ import { TopPostsCard } from "@/components/analytics/top-posts-card";
 import { TopicsCard } from "@/components/analytics/topics-card";
 import { Header } from "@/components/layout/header";
 import { Button } from "@/components/ui/button";
+import {
+  clearActiveAnalysisRun,
+  clearPendingAnalysisRequest,
+  saveActiveAnalysisRun,
+} from "@/lib/analysis-run-storage";
 import { Card, CardContent } from "@/components/ui/card";
 import { Select } from "@/components/ui/select";
 import { useAnalysisRun, useReport } from "@/hooks/use-analysis";
@@ -240,13 +245,17 @@ function getTakeawayLinks(report: ReportSnapshot["report_json"], mode: AnalysisM
   const promptModes = new Set(report.summary.prompt_modes || []);
   const links: TakeawayLink[] = [];
 
-  const pushUniqueLink = (label: string, posts: ReportPost[] | undefined) => {
-    const target = (posts || []).find((item) => item.post_url?.trim());
-    const url = target?.post_url?.trim();
-    if (!url || links.some((item) => item.url === url)) {
+  const pushUniqueUrl = (label: string, url?: string | null) => {
+    const normalized = (url || "").trim();
+    if (!normalized || links.some((item) => item.url === normalized)) {
       return;
     }
-    links.push({ label, url });
+    links.push({ label, url: normalized });
+  };
+
+  const pushUniqueLink = (label: string, posts: ReportPost[] | undefined) => {
+    const target = (posts || []).find((item) => item.post_url?.trim());
+    pushUniqueUrl(label, target?.post_url);
   };
 
   if (mode === "post_sentiment") {
@@ -301,7 +310,18 @@ function getTakeawayLinks(report: ReportSnapshot["report_json"], mode: AnalysisM
     }
   }
 
-  return links.length === 1 ? [{ ...links[0], label: "Source post" }] : links;
+  if (mode === "source_comparison") {
+    const topSource = (report.sources?.comparison || []).find((item) => item.source_url?.trim());
+    pushUniqueUrl("Check source", topSource?.source_url);
+  }
+
+  if (links.length !== 1) {
+    return links;
+  }
+  if (mode === "source_comparison") {
+    return links;
+  }
+  return [{ ...links[0], label: "Source post" }];
 }
 
 function getPostSections(report: ReportSnapshot["report_json"], mode: AnalysisMode): PostSection[] {
@@ -469,6 +489,19 @@ export default function ReportPage({ params }: { params: { projectId: string; re
   const reportQuery = useReport(params.reportId, runQuery.data?.status === "completed");
   const [showPostPanels, setShowPostPanels] = useState(false);
   const [postsLimit, setPostsLimit] = useState("5");
+
+  useEffect(() => {
+    const status = runQuery.data?.status;
+    if (!status) {
+      return;
+    }
+    if (status === "pending" || status === "running") {
+      saveActiveAnalysisRun(params.projectId, params.reportId);
+      return;
+    }
+    clearActiveAnalysisRun(params.projectId);
+    clearPendingAnalysisRequest(params.projectId);
+  }, [params.projectId, params.reportId, runQuery.data?.status]);
 
   if (runQuery.isLoading) {
     return <div>Загрузка анализа...</div>;

@@ -51,6 +51,11 @@ export const api = {
       method: "POST",
       body: JSON.stringify(payload)
     }),
+  findActiveAnalysisRun: (projectId: string, payload: AnalysisCreatePayload) =>
+    apiFetch<AnalysisRun | null>(`/projects/${projectId}/active-analysis-run`, {
+      method: "POST",
+      body: JSON.stringify(payload)
+    }),
   listReportsTree: () => apiFetch<ProjectReportsTreeItem[]>("/reports-tree"),
   deleteReport: (analysisRunId: string) => apiFetch<void>(`/analysis-runs/${analysisRunId}`, { method: "DELETE" }),
   getAnalysisRun: (analysisRunId: string) => apiFetch<AnalysisRun>(`/analysis-runs/${analysisRunId}`),

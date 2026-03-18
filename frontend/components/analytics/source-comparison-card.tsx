@@ -63,6 +63,19 @@ export function SourceComparisonCard({
                 <MetricItem label="Комментарии в среднем" value={item.avg_comments_per_post} />
                 <MetricItem label="Репосты в среднем" value={item.avg_reposts_per_post} />
               </div>
+
+              {item.source_url ? (
+                <div className="mt-3">
+                  <a
+                    href={item.source_url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex rounded-full border border-primary/20 bg-primary/10 px-3 py-1 text-xs font-medium text-primary transition hover:bg-primary/15"
+                  >
+                    Check source
+                  </a>
+                </div>
+              ) : null}
             </div>
           ))
         ) : (

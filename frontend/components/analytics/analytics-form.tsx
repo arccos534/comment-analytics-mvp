@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { Button } from "@/components/ui/button";
@@ -10,8 +10,18 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { useRunAnalysis } from "@/hooks/use-analysis";
+import {
+  clearPendingAnalysisRequest,
+  loadActiveAnalysisRun,
+  loadAnalysisDraft,
+  loadPendingAnalysisRequest,
+  saveActiveAnalysisRun,
+  saveAnalysisDraft,
+  savePendingAnalysisRequest,
+} from "@/lib/analysis-run-storage";
+import { api } from "@/lib/api";
 import { useUiStore } from "@/store/ui-store";
-import { AnalysisMode } from "@/types/analytics";
+import { AnalysisCreatePayload, AnalysisMode } from "@/types/analytics";
 import { Source } from "@/types/source";
 
 const ANALYSIS_MODE_OPTIONS: Array<{ value: AnalysisMode | "auto"; label: string }> = [
@@ -41,13 +51,100 @@ export function AnalyticsForm({ projectId, sources }: { projectId: string; sourc
   const [periodTo, setPeriodTo] = useState("");
   const [platforms, setPlatforms] = useState<string[]>(["telegram", "vk"]);
   const [selectedSourceIds, setSelectedSourceIds] = useState<string[]>([]);
+  const [isRestoringRun, setIsRestoringRun] = useState(true);
+  const [isDraftLoaded, setIsDraftLoaded] = useState(false);
 
   const readySources = useMemo(() => sources.filter((source) => source.status === "ready"), [sources]);
   const allSourcesSelected =
     readySources.length > 0 && readySources.every((source) => selectedSourceIds.includes(source.id));
 
-  async function handleSubmit() {
-    const run = await runAnalysis.mutateAsync({
+  useEffect(() => {
+    const draft = loadAnalysisDraft(projectId);
+    if (draft) {
+      setPromptText(draft.promptText || "");
+      setTheme(draft.theme || "");
+      setKeywords(draft.keywords || "");
+      setAnalysisMode((draft.analysisMode as AnalysisMode | "auto") || "auto");
+      setPeriodFrom(draft.periodFrom || "");
+      setPeriodTo(draft.periodTo || "");
+      setPlatforms(draft.platforms?.length ? draft.platforms : ["telegram", "vk"]);
+      setSelectedSourceIds(draft.selectedSourceIds || []);
+    }
+    setIsDraftLoaded(true);
+  }, [projectId]);
+
+  useEffect(() => {
+    if (!isDraftLoaded) {
+      return;
+    }
+    saveAnalysisDraft(projectId, {
+      promptText,
+      theme,
+      keywords,
+      analysisMode,
+      periodFrom,
+      periodTo,
+      platforms,
+      selectedSourceIds,
+    });
+  }, [analysisMode, isDraftLoaded, keywords, periodFrom, periodTo, platforms, projectId, promptText, selectedSourceIds, theme]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const activeRun = loadActiveAnalysisRun(projectId);
+    if (activeRun?.runId) {
+      setLatestAnalysisRunId(activeRun.runId);
+      router.replace(`/projects/${projectId}/reports/${activeRun.runId}`);
+      return;
+    }
+
+    const pendingRequest = loadPendingAnalysisRequest(projectId);
+    if (!pendingRequest) {
+      setIsRestoringRun(false);
+      return;
+    }
+
+    let attempts = 0;
+    const maxAttempts = 10;
+
+    const resolvePendingRun = async () => {
+      attempts += 1;
+      try {
+        const run = await api.findActiveAnalysisRun(projectId, pendingRequest);
+        if (cancelled) {
+          return;
+        }
+        if (run?.id) {
+          clearPendingAnalysisRequest(projectId);
+          saveActiveAnalysisRun(projectId, run.id);
+          setLatestAnalysisRunId(run.id);
+          router.replace(`/projects/${projectId}/reports/${run.id}`);
+          return;
+        }
+      } catch {
+        if (cancelled) {
+          return;
+        }
+      }
+
+      if (attempts >= maxAttempts) {
+        clearPendingAnalysisRequest(projectId);
+        setIsRestoringRun(false);
+        return;
+      }
+
+      window.setTimeout(resolvePendingRun, 1500);
+    };
+
+    void resolvePendingRun();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, router, setLatestAnalysisRunId]);
+
+  function buildPayload(): AnalysisCreatePayload {
+    return {
       prompt_text: promptText,
       theme,
       keywords: keywords
@@ -59,7 +156,15 @@ export function AnalyticsForm({ projectId, sources }: { projectId: string; sourc
       period_to: periodTo ? new Date(periodTo).toISOString() : null,
       platforms: platforms as ("telegram" | "vk")[],
       source_ids: selectedSourceIds,
-    });
+    };
+  }
+
+  async function handleSubmit() {
+    const payload = buildPayload();
+    savePendingAnalysisRequest(projectId, payload);
+    const run = await runAnalysis.mutateAsync(payload);
+    clearPendingAnalysisRequest(projectId);
+    saveActiveAnalysisRun(projectId, run.id);
     setLatestAnalysisRunId(run.id);
     router.push(`/projects/${projectId}/reports/${run.id}`);
   }
@@ -147,12 +252,7 @@ export function AnalyticsForm({ projectId, sources }: { projectId: string; sourc
             </div>
             <div className="space-y-2">
               <Label htmlFor="period-to">To</Label>
-              <Input
-                id="period-to"
-                type="date"
-                value={periodTo}
-                onChange={(event) => setPeriodTo(event.target.value)}
-              />
+              <Input id="period-to" type="date" value={periodTo} onChange={(event) => setPeriodTo(event.target.value)} />
             </div>
           </div>
         </div>
@@ -197,8 +297,8 @@ export function AnalyticsForm({ projectId, sources }: { projectId: string; sourc
               )}
             </div>
           </div>
-          <Button onClick={handleSubmit} disabled={runAnalysis.isPending || !promptText.trim()}>
-            {runAnalysis.isPending ? "Generating..." : "Generate report"}
+          <Button onClick={handleSubmit} disabled={runAnalysis.isPending || isRestoringRun || !promptText.trim()}>
+            {isRestoringRun ? "Restoring..." : runAnalysis.isPending ? "Generating..." : "Generate report"}
           </Button>
         </div>
       </CardContent>

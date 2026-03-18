@@ -32,6 +32,17 @@ class AnalysisRepository:
         self.db.commit()
         return True
 
+    def list_active_runs(self, project_id: UUID) -> list[AnalysisRun]:
+        rows = self.db.execute(
+            select(AnalysisRun)
+            .where(
+                AnalysisRun.project_id == project_id,
+                AnalysisRun.status.in_([AnalysisRunStatusEnum.pending, AnalysisRunStatusEnum.running]),
+            )
+            .order_by(AnalysisRun.created_at.desc())
+        )
+        return list(rows.scalars().all())
+
     def update_run_status(
         self,
         analysis_run_id: UUID,
