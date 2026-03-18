@@ -20,6 +20,10 @@ def _load_model():
     settings = get_settings()
     if not SentenceTransformer:
         return None
+    try:
+        return SentenceTransformer(settings.sentence_transformer_model)
+    except Exception:
+        return None
 
 
 @lru_cache(maxsize=64)
@@ -29,10 +33,6 @@ def _encode_baseline(text: str):
         return None
     try:
         return model.encode(text, normalize_embeddings=True)
-    except Exception:
-        return None
-    try:
-        return SentenceTransformer(settings.sentence_transformer_model)
     except Exception:
         return None
 

@@ -41,6 +41,8 @@ class Settings(BaseSettings):
     openai_compatible_api_key: str | None = None
     openai_compatible_model: str = "gpt-5.4"
     openai_reasoning_effort: str = "high"
+    openai_prompt_router_model: str = "gpt-4.1-mini"
+    openai_prompt_router_max_completion_tokens: int = 160
     openai_comment_analysis_model: str = "gpt-5.4-mini"
     openai_comment_analysis_reasoning_effort: str = "low"
     llm_summary_enabled: bool = False

@@ -14,6 +14,7 @@ from app.analytics.prompt_intent import (
     build_prompt_intent as build_shared_prompt_intent,
     extract_prompt_scope_terms as extract_shared_prompt_scope_terms,
 )
+from app.analytics.prompt_router import PromptRouter
 from app.analytics.relevance import RelevanceScorer
 from app.analytics.sentiment import SentimentAnalyzer
 from app.core.config import get_settings
@@ -211,6 +212,7 @@ class AnalyticsService:
         self.posts = PostRepository(db)
         self.analysis_repo = AnalysisRepository(db)
         self.comment_llm = LLMCommentAnalyzer()
+        self.prompt_router = PromptRouter()
         self.sentiment = SentimentAnalyzer()
         self.relevance = RelevanceScorer()
         self.aggregator = ReportAggregator()
@@ -475,13 +477,6 @@ class AnalyticsService:
             platform_filters = (run.filters_json or {}).get("platforms") or []
             source_filters = [UUID(value) for value in ((run.filters_json or {}).get("source_ids") or [])]
             available_sources = self._resolve_analysis_sources(run.project_id, source_filters, platform_filters)
-            records = self.comments.get_analysis_records(
-                run.project_id,
-                period_from=run.period_from,
-                period_to=run.period_to,
-                source_ids=source_filters,
-                platforms=platform_filters,
-            )
             post_records = self.posts.get_analysis_posts(
                 run.project_id,
                 period_from=run.period_from,
@@ -490,13 +485,24 @@ class AnalyticsService:
                 platforms=platform_filters,
             )
             has_explicit_scope = bool((run.theme or "").strip() or (run.keywords_json or []))
-            prompt_intent = build_shared_prompt_intent(run.prompt_text, has_explicit_scope=has_explicit_scope)
-            prompt_intent = apply_shared_analysis_mode_override(
-                prompt_intent,
-                (run.filters_json or {}).get("analysis_mode_override"),
+            prompt_route = self.prompt_router.route(
+                run.prompt_text,
                 has_explicit_scope=has_explicit_scope,
+                override_mode=(run.filters_json or {}).get("analysis_mode_override"),
             )
+            prompt_intent = prompt_route.intent
             source_only_prompt = prompt_intent.source_only
+            records = (
+                self.comments.get_analysis_records(
+                    run.project_id,
+                    period_from=run.period_from,
+                    period_to=run.period_to,
+                    source_ids=source_filters,
+                    platforms=platform_filters,
+                )
+                if prompt_route.needs_comment_analysis
+                else []
+            )
             if source_only_prompt:
                 scoped_posts = [
                     {"post": post, "source": source}
@@ -523,74 +529,73 @@ class AnalyticsService:
                 if record[1].id in scoped_post_ids and not self._is_advertising_post(record[1].post_text)
             ]
 
-            comment_analysis_inputs: list[dict] = []
-            for comment, post, source in scoped_records:
-                relevance_score = self.relevance.score_comment_prompt(
-                    text=comment.text,
-                    prompt_text=run.prompt_text,
-                )
-                if post.id in scoped_post_ids and not source_only_prompt:
-                    # Comments under a prompt-relevant post are part of the audience
-                    # reaction even if the comment text does not repeat the prompt terms.
-                    relevance_score = max(relevance_score, 0.2)
-                comment_analysis_inputs.append(
-                    {
-                        "comment": comment,
-                        "post": post,
-                        "source": source,
-                        "comment_text": comment.text,
-                        "post_text": post.post_text or "",
-                        "relevance_score": relevance_score,
-                    }
-                )
-
-            llm_comment_results = self.comment_llm.analyze_many(
-                [
-                    {
-                        "comment_text": item["comment_text"],
-                        "post_text": item["post_text"],
-                    }
-                    for item in comment_analysis_inputs
-                ]
-            )
-
             enriched_comments: list[dict] = []
-            for item, analysis in zip(comment_analysis_inputs, llm_comment_results):
-                comment = item["comment"]
-                post = item["post"]
-                source = item["source"]
-                relevance_score = item["relevance_score"]
-                sentiment_value = analysis["sentiment"]
-                try:
-                    sentiment_enum = SentimentEnum(sentiment_value)
-                except ValueError:
-                    sentiment_enum = self.sentiment.analyze(comment.text)["sentiment"]
-                    sentiment_value = sentiment_enum.value
-                topics = analysis["topics"]
-                extracted_keywords = analysis["keywords"]
-                self.analysis_repo.upsert_comment_analysis(
-                    comment_id=comment.id,
-                    sentiment=sentiment_enum,
-                    sentiment_score=analysis["score"],
-                    topics_json=topics,
-                    keywords_json=extracted_keywords,
-                    relevance_score=relevance_score,
-                    commit=False,
-                )
-                enriched_comments.append(
-                    {
-                        "comment": comment,
-                        "post": post,
-                        "source": source,
-                        "sentiment": sentiment_value,
-                        "sentiment_score": analysis["score"],
-                        "topics": topics,
-                        "keywords": extracted_keywords,
-                        "relevance_score": relevance_score,
-                    }
+            if prompt_route.needs_comment_analysis:
+                comment_analysis_inputs: list[dict] = []
+                for comment, post, source in scoped_records:
+                    relevance_score = self.relevance.score_comment_prompt(
+                        text=comment.text,
+                        prompt_text=run.prompt_text,
+                    )
+                    if post.id in scoped_post_ids and not source_only_prompt:
+                        relevance_score = max(relevance_score, 0.2)
+                    comment_analysis_inputs.append(
+                        {
+                            "comment": comment,
+                            "post": post,
+                            "source": source,
+                            "comment_text": comment.text,
+                            "post_text": post.post_text or "",
+                            "relevance_score": relevance_score,
+                        }
+                    )
+
+                llm_comment_results = self.comment_llm.analyze_many(
+                    [
+                        {
+                            "comment_text": item["comment_text"],
+                            "post_text": item["post_text"],
+                        }
+                        for item in comment_analysis_inputs
+                    ]
                 )
 
-            self.db.commit()
+                for item, analysis in zip(comment_analysis_inputs, llm_comment_results):
+                    comment = item["comment"]
+                    post = item["post"]
+                    source = item["source"]
+                    relevance_score = item["relevance_score"]
+                    sentiment_value = analysis["sentiment"]
+                    try:
+                        sentiment_enum = SentimentEnum(sentiment_value)
+                    except ValueError:
+                        sentiment_enum = self.sentiment.analyze(comment.text)["sentiment"]
+                        sentiment_value = sentiment_enum.value
+                    topics = analysis["topics"]
+                    extracted_keywords = analysis["keywords"]
+                    self.analysis_repo.upsert_comment_analysis(
+                        comment_id=comment.id,
+                        sentiment=sentiment_enum,
+                        sentiment_score=analysis["score"],
+                        topics_json=topics,
+                        keywords_json=extracted_keywords,
+                        relevance_score=relevance_score,
+                        commit=False,
+                    )
+                    enriched_comments.append(
+                        {
+                            "comment": comment,
+                            "post": post,
+                            "source": source,
+                            "sentiment": sentiment_value,
+                            "sentiment_score": analysis["score"],
+                            "topics": topics,
+                            "keywords": extracted_keywords,
+                            "relevance_score": relevance_score,
+                        }
+                    )
+
+                self.db.commit()
 
             report_json = self.aggregator.build_report(
                 run=run,
@@ -602,7 +607,35 @@ class AnalyticsService:
                 scoped_posts=scoped_posts,
                 selected_sources=available_sources,
             )
-            summary_data, summary_text = self.report_service.build_summary(report_json, prompt_text=run.prompt_text)
+            report_json.setdefault("meta", {}).update(
+                {
+                    "router_source": prompt_route.router_source,
+                    "router_confidence": prompt_route.confidence,
+                    "router_reason": prompt_route.reason,
+                    "needs_llm_reasoning": prompt_route.needs_llm_reasoning,
+                    "needs_comment_analysis": prompt_route.needs_comment_analysis,
+                    "needs_theme_analysis": prompt_route.needs_theme_analysis,
+                }
+            )
+            summary_data, summary_text = self.report_service.build_summary(
+                report_json,
+                prompt_text=run.prompt_text,
+                prompt_route={
+                    "analysis_mode": prompt_route.analysis_mode,
+                    "needs_llm_reasoning": prompt_route.needs_llm_reasoning,
+                    "needs_comment_analysis": prompt_route.needs_comment_analysis,
+                    "needs_theme_analysis": prompt_route.needs_theme_analysis,
+                    "confidence": prompt_route.confidence,
+                    "router_source": prompt_route.router_source,
+                    "reason": prompt_route.reason,
+                    "primary_mode": prompt_intent.primary_mode,
+                    "prompt_modes": prompt_intent.prompt_mode,
+                    "secondary_modes": prompt_intent.secondary_modes,
+                    "analysis_axes": prompt_intent.analysis_axes,
+                    "request_contract": prompt_intent.request_contract,
+                    "answer_strategy": prompt_intent.answer_strategy,
+                },
+            )
             report_json["summary"] = summary_data
             self.analysis_repo.replace_report_snapshot(run.id, report_json, summary_text)
             self.analysis_repo.update_run_status(run.id, AnalysisRunStatusEnum.completed, finished_at=utcnow())
