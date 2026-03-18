@@ -24,8 +24,8 @@ except Exception:  # pragma: no cover
 
 logger = logging.getLogger(__name__)
 
-COMMENT_ANALYSIS_CACHE_VERSION = "v1"
-COMMENT_ANALYSIS_PROMPT_VERSION = "comment-analysis-v1"
+COMMENT_ANALYSIS_CACHE_VERSION = "v2"
+COMMENT_ANALYSIS_PROMPT_VERSION = "comment-analysis-v2"
 
 GENERIC_TOPIC_PHRASES = {
     "общее обсуждение",
@@ -88,8 +88,7 @@ class LLMCommentAnalyzer:
     def _llm_enabled(self) -> bool:
         return bool(
             OpenAI
-            and
-            self.settings.llm_comment_analysis_enabled
+            and self.settings.llm_comment_analysis_enabled
             and self.settings.openai_compatible_base_url
             and self.settings.openai_compatible_api_key
         )
@@ -112,13 +111,10 @@ class LLMCommentAnalyzer:
                 api_key=self.settings.openai_compatible_api_key,
             )
             completion = client.chat.completions.create(
-                model=self.settings.openai_compatible_model,
-                max_completion_tokens=1800,
+                model=self._comment_model(),
+                max_completion_tokens=max(int(self.settings.llm_comment_analysis_max_completion_tokens or 700), 200),
                 messages=[
-                    {
-                        "role": "system",
-                        "content": self._build_system_prompt(),
-                    },
+                    {"role": "system", "content": self._build_system_prompt()},
                     {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
                 ],
                 **self._completion_options(),
@@ -165,8 +161,18 @@ class LLMCommentAnalyzer:
             score = 0.0
         score = max(-1.0, min(1.0, score))
 
-        topics = self._clean_phrases(raw_item.get("topics"), limit=3, titleize=True, generic=GENERIC_TOPIC_PHRASES)
-        keywords = self._clean_phrases(raw_item.get("keywords"), limit=5, titleize=False, generic=GENERIC_KEYWORD_PHRASES)
+        topics = self._clean_phrases(
+            raw_item.get("topics"),
+            limit=2,
+            titleize=True,
+            generic=GENERIC_TOPIC_PHRASES,
+        )
+        keywords = self._clean_phrases(
+            raw_item.get("keywords"),
+            limit=3,
+            titleize=False,
+            generic=GENERIC_KEYWORD_PHRASES,
+        )
 
         if not topics:
             fallback = self._fallback_analysis(source)
@@ -206,7 +212,7 @@ class LLMCommentAnalyzer:
         digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()
         return (
             f"comment-analysis-cache:{COMMENT_ANALYSIS_CACHE_VERSION}:{COMMENT_ANALYSIS_PROMPT_VERSION}:"
-            f"{self.settings.openai_compatible_model}:{digest}"
+            f"{self._comment_model()}:{self._comment_reasoning_effort() or 'none'}:{digest}"
         )
 
     def _get_cached_result(self, item: dict) -> dict | None:
@@ -231,32 +237,30 @@ class LLMCommentAnalyzer:
 
     def _build_system_prompt(self) -> str:
         return (
-            "You analyze Russian social-media comments in the context of the post they reply to.\n"
+            "Analyze Russian social-media comments in the context of the post they reply to.\n"
             "Return strict JSON object with one key: items.\n"
             "For each input item return:\n"
             '- index: integer from the input\n'
             '- sentiment: "positive" | "negative" | "neutral"\n'
-            "- score: float from -1.0 to 1.0, where negative is criticism/disapproval, positive is approval/support, neutral is mixed/factual/unclear\n"
-            "- topics: 1-3 short Russian motive/theme labels for what this comment is about, not generic, not broken fragments\n"
-            "- keywords: 2-5 short Russian signal words or short phrases from the comment meaning, without generic filler\n"
+            "- score: float from -1.0 to 1.0\n"
+            "- topics: 1-2 short Russian motive labels, not generic and not broken fragments\n"
+            "- keywords: 1-3 short Russian signal phrases, not generic filler\n"
             "Rules:\n"
-            "- Use the post_context to resolve short comments like 'правильно', 'ужас', 'хорошо', 'мошенники'.\n"
-            "- If a comment expresses distrust, criticism, insult, suspicion, disappointment, accusations, mentions fakes/fraud/poor quality, classify it as negative.\n"
-            "- If a comment clearly approves, supports, praises, thanks, or agrees with the post, classify it as positive.\n"
-            "- If the comment is a question, a dry factual note, a mixed reaction, or the polarity is unclear, classify it as neutral.\n"
-            "- Topics must sound like concise editorial motives in Russian, for example 'недоверие к экспертизе', 'сомнения в качестве продукта', 'поддержка решения'.\n"
-            "- Never output generic labels like 'реакция аудитории', 'комментарий к новости', 'мнение людей'.\n"
-            "- Do not add explanations outside JSON.\n"
+            "- Negative means criticism, distrust, accusation, disappointment, anger, complaint, fear, or mention of fake, fraud, poor quality.\n"
+            "- Positive means approval, praise, support, gratitude, relief, or clear agreement.\n"
+            "- Neutral means factual, mixed, unclear, weak emotion, or off-topic.\n"
+            "- Use post_context to resolve short comments.\n"
+            "- Keep the JSON compact and do not add explanations outside JSON.\n"
         )
 
     def _prepare_post_context(self, text: str) -> str:
         prepared = re.sub(r"https?://\S+|t\.me/\S+|vk\.com/\S+", " ", text)
         prepared = re.sub(r"\s+", " ", prepared).strip()
-        return prepared[:220]
+        return prepared[:160]
 
     def _prepare_comment_text(self, text: str) -> str:
         prepared = re.sub(r"\s+", " ", text).strip()
-        return prepared[:420]
+        return prepared[:280]
 
     def _extract_json_text(self, text: str) -> str:
         cleaned = text.strip()
@@ -298,10 +302,22 @@ class LLMCommentAnalyzer:
         return phrases
 
     def _completion_options(self) -> dict:
-        effort = (self.settings.openai_reasoning_effort or "").strip().lower()
+        effort = self._comment_reasoning_effort()
         if effort and effort != "none":
             return {"reasoning_effort": effort}
         return {}
+
+    def _comment_model(self) -> str:
+        return (
+            (self.settings.openai_comment_analysis_model or "").strip()
+            or self.settings.openai_compatible_model
+        )
+
+    def _comment_reasoning_effort(self) -> str:
+        return (
+            (self.settings.openai_comment_analysis_reasoning_effort or "").strip().lower()
+            or "none"
+        )
 
     def _log_openai_completion(self, completion, purpose: str) -> None:
         usage = getattr(completion, "usage", None)
@@ -309,9 +325,9 @@ class LLMCommentAnalyzer:
             "OpenAI completion succeeded",
             extra={
                 "purpose": purpose,
-                "requested_model": self.settings.openai_compatible_model,
+                "requested_model": self._comment_model(),
                 "response_model": getattr(completion, "model", None),
-                "reasoning_effort": self.settings.openai_reasoning_effort,
+                "reasoning_effort": self._comment_reasoning_effort(),
                 "prompt_tokens": getattr(usage, "prompt_tokens", None),
                 "completion_tokens": getattr(usage, "completion_tokens", None),
                 "total_tokens": getattr(usage, "total_tokens", None),

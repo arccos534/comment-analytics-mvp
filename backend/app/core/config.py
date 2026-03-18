@@ -41,6 +41,8 @@ class Settings(BaseSettings):
     openai_compatible_api_key: str | None = None
     openai_compatible_model: str = "gpt-5.4"
     openai_reasoning_effort: str = "high"
+    openai_comment_analysis_model: str = "gpt-5.4-mini"
+    openai_comment_analysis_reasoning_effort: str = "low"
     llm_summary_enabled: bool = False
     llm_summary_cache_ttl_seconds: int = 86400
     llm_summary_min_comments: int = 8
@@ -48,6 +50,7 @@ class Settings(BaseSettings):
     llm_summary_max_examples_per_bucket: int = 1
     llm_comment_analysis_enabled: bool = True
     llm_comment_analysis_batch_size: int = 10
+    llm_comment_analysis_max_completion_tokens: int = 700
     llm_comment_analysis_cache_ttl_seconds: int = 2592000
 
     cors_origins: list[str] = Field(
