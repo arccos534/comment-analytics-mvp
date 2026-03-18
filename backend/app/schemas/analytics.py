@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.enums import AnalysisRunStatusEnum, PlatformEnum
 from app.schemas.common import ORMModel
@@ -58,14 +58,17 @@ class ReportPostItem(BaseModel):
 
 
 class ReportSchema(BaseModel):
-    meta: dict
-    stats: dict
-    sentiment: dict
-    topics: list[TopicItem]
-    insights: dict
-    examples: dict
-    posts: dict
-    summary: dict
+    model_config = ConfigDict(extra="allow")
+
+    meta: dict = Field(default_factory=dict)
+    stats: dict = Field(default_factory=dict)
+    sentiment: dict = Field(default_factory=dict)
+    topics: list[TopicItem] = Field(default_factory=list)
+    insights: dict = Field(default_factory=dict)
+    examples: dict = Field(default_factory=dict)
+    posts: dict = Field(default_factory=dict)
+    sources: dict = Field(default_factory=dict)
+    summary: dict = Field(default_factory=dict)
 
 
 class ReportSnapshotResponse(ORMModel):
