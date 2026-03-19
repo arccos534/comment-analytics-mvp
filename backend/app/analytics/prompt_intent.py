@@ -103,6 +103,25 @@ PROMPT_STOPWORDS = GENERIC_PROMPT_SCOPE_TERMS | {
     "неделю",
     "месяца",
     "месяцем",
+    "лучший",
+    "лучшие",
+    "лучшая",
+    "лучшего",
+    "сильный",
+    "сильные",
+    "успешный",
+    "успешные",
+    "популярный",
+    "популярные",
+    "непопулярные",
+    "интерес",
+    "интереса",
+    "интересом",
+    "цепляет",
+    "цепляют",
+    "зашел",
+    "зашла",
+    "зашли",
 }
 
 PRIMARY_MODE_PRIORITY = [
@@ -124,15 +143,17 @@ RAW_MODE_PATTERNS: list[tuple[str, str]] = [
     (r"(какой канал лучше|какой источник лучше|какое сообщество лучше)", "source_comparison"),
     (r"(сравн\w*).*(канал|сообщество|источник)", "source_comparison"),
     (r"(подписчик|размер аудитории|активная аудитория|активность аудитории)", "source_comparison"),
+    (r"(меньше\s+подписчик\w*.*(выше|лучше).*(вовлеч|активн)|низк\w+\s+подписчик\w*.*(вовлеч|активн))", "low_subscribers_high_engagement_request"),
     (
         r"(какой|какая).*(пост|новост|публикац).*(сам\w*|наиболее).*(успешн|сильн|лучш)",
         "successful_post_request",
     ),
     (
-        r"(какие|покажи|выдели|найди).*(лучши|сильн|успешн).*(пост|публикац)",
+        r"(какие|покажи|выдели|найди).*(лучши|сильн|успешн|лучшими?\s+показател).*(пост|публикац)",
         "successful_posts_request",
     ),
     (r"(пост|публикац).*(лучши|сильн|успешн)", "successful_posts_request"),
+    (r"(самые\s+сильные\s+публикац|сильнейш\w+\s+публикац|лучшие\s+посты|лучшие\s+публикац)", "successful_posts_request"),
     (
         r"(какая|какой|какие).*(новост|пост|публикац).*(больше|сильн|максим|сам|наибольш|наиболее).*(негатив|критик|жалоб|хуже)",
         "most_negative_post",
@@ -163,8 +184,9 @@ RAW_MODE_PATTERNS: list[tuple[str, str]] = [
     (r"(тем|сюжет).*((?<!не)популярн|успешн|сильн)", "theme_popularity_ranked"),
     (r"(\d+\s+)?(сам\w+\s+)?(непопулярн|слаб|худш).*(тем|сюжет)", "theme_underperformance_ranked"),
     (r"(тем|сюжет).*(непопулярн|слаб|худш)", "theme_underperformance_ranked"),
+    (r"(какие\s+темы\s+(не\s+вызывают|меньше\s+всего\s+вызывают).*(интерес|вовлеч)|темы.*не\s+интересны\s+аудитории|темы.*меньше\s+всего\s+интересуют)", "theme_low_interest_request"),
     (r"(что сейчас сильнее всего цепля\w+ людей|что сильнее всего цепля\w+ людей|что людей цепля\w+)", "interest_analysis"),
-    (r"(интерес|вовлеч|резонанс|цепля\w+)", "interest_analysis"),
+    (r"(интерес|вовлеч|резонанс|цепля\w+|зашл\w+|вкат\w+|хайпан\w+)", "interest_analysis"),
     (r"(негатив|негативн|критик|возмущ|раздраж)", "negative_analysis"),
     (r"(позитив|положит|нрав|одобр|поддерж)", "positive_analysis"),
     (r"(что|как|какие).*(люди|аудитория).*(думают|относятся|воспринимают|реагируют)", "reaction_analysis"),
@@ -242,6 +264,7 @@ REQUESTED_COUNT_WORDS: dict[str, int] = {
     "пару": 2,
     "двойка": 2,
     "двойку": 2,
+    "двойке": 2,
     "тройка": 3,
     "тройку": 3,
     "тройке": 3,
@@ -249,8 +272,11 @@ REQUESTED_COUNT_WORDS: dict[str, int] = {
     "пятёрка": 5,
     "пятерку": 5,
     "пятёрку": 5,
+    "пятерке": 5,
+    "пятёрке": 5,
     "десятка": 10,
     "десятку": 10,
+    "десятке": 10,
 }
 
 REQUESTED_COUNT_WORD_PATTERN = "|".join(
@@ -297,7 +323,7 @@ def extract_prompt_scope_terms(prompt_text: str | None) -> list[str]:
     ]
     for pattern in phrase_patterns:
         for match in re.finditer(pattern, prompt):
-            value = match.group(1).strip(" .,!?;:-")
+            value = _clean_scope_phrase(match.group(1))
             if value and value not in ordered:
                 ordered.append(value)
 
@@ -306,6 +332,35 @@ def extract_prompt_scope_terms(prompt_text: str | None) -> list[str]:
             ordered.append(token)
 
     return [_titleize_phrase(item) for item in ordered[:12]]
+
+
+def _clean_scope_phrase(value: str) -> str:
+    cleaned = value.strip(" .,!?;:-")
+    if not cleaned:
+        return ""
+
+    tokens = [token for token in cleaned.split() if token]
+    trailing_noise = PROMPT_STOPWORDS | {
+        "интерес",
+        "интереса",
+        "интересом",
+        "вовлеченности",
+        "вовлеченность",
+        "популярные",
+        "непопулярные",
+        "успешные",
+        "сильные",
+        "лучшие",
+        "лучший",
+        "метрики",
+        "показатели",
+        "аудитории",
+        "почему",
+        "топ",
+    }
+    while tokens and normalize_prompt_text(tokens[-1]) in trailing_noise:
+        tokens.pop()
+    return " ".join(tokens).strip()
 
 
 def extract_requested_percentage(prompt_text: str | None) -> int | None:
@@ -392,6 +447,18 @@ def infer_prompt_mode(prompt_text: str | None) -> list[str]:
         if re.search(pattern, prompt):
             modes.append(mode)
 
+    direct_alias_patterns = [
+        (r"(какой\s+пост\s+самый\s+(успешн|сильн|лучш))", "successful_post_request"),
+        (r"(какие\s+посты\s+лучши|покажи\s+самые\s+сильные\s+публикац|лучшие\s+публикац)", "successful_posts_request"),
+        (r"(какая\s+новость\s+вызвала\s+лучш\w+\s+реакц|какой\s+пост\s+лучше\s+всего\s+зашел\s+аудитории)", "most_positive_post"),
+        (r"(что\s+сейчас\s+сильнее\s+всего\s+цепляет\s+людей|что\s+людям\s+(вообще|ваще)\s+заходит|что\s+людям\s+вкатил\w+|что\s+людям\s+зашл\w+|что\s+людям\s+хайпанул\w+)", "interest_analysis"),
+        (r"(какие\s+темы\s+не\s+вызывают\s+интерес|какие\s+темы\s+меньше\s+всего\s+интересуют|какие\s+темы\s+вызывают\s+меньше\s+всего\s+интерес)", "theme_low_interest_request"),
+        (r"(у\s+какого\s+источника\s+меньше\s+подписчик\w+,\s*но\s+выше\s+вовлеч)", "low_subscribers_high_engagement_request"),
+    ]
+    for pattern, mode in direct_alias_patterns:
+        if re.search(pattern, prompt):
+            modes.append(mode)
+
     has_post_reference = any(token in prompt for token in ("пост", "публикац", "новост"))
     has_percent_reference = "%" in prompt or "процент" in prompt
     if has_post_reference and has_percent_reference:
@@ -416,6 +483,8 @@ def infer_analysis_axes(prompt_text: str | None) -> list[str]:
 
     if "source_comparison" in modes:
         axes.append("source_metrics")
+    if "low_subscribers_high_engagement_request" in modes and "source_metrics" not in axes:
+        axes.append("source_metrics")
 
     post_related_modes = {
         "most_discussed_news",
@@ -427,8 +496,11 @@ def infer_analysis_axes(prompt_text: str | None) -> list[str]:
         "most_positive_post",
         "successful_posts_bucket",
         "underperforming_posts_bucket",
+        "successful_post_request",
+        "successful_posts_request",
         "theme_popularity_ranked",
         "theme_underperformance_ranked",
+        "theme_low_interest_request",
         "specific_news_answer",
         "theme_analysis",
         "interest_analysis",
@@ -447,6 +519,8 @@ def infer_analysis_axes(prompt_text: str | None) -> list[str]:
         "negative_analysis",
         "positive_analysis",
         "reaction_analysis",
+        "successful_post_request",
+        "successful_posts_request",
         "support_analysis",
         "complaints_analysis",
         "concerns_analysis",
@@ -481,6 +555,8 @@ def infer_request_contract(
                 "use_source_metrics_and_subscribers",
             ]
         )
+        if "low_subscribers_high_engagement_request" in set(raw_modes):
+            contract.append("highlight_sources_with_smaller_audience_but_higher_engagement")
     elif primary == "post_popularity":
         contract.extend(
             [
@@ -528,6 +604,8 @@ def infer_request_contract(
                 "explain_why_themes_underperform",
             ]
         )
+        if "theme_low_interest_request" in set(raw_modes):
+            contract.append("rank_themes_by_low_attention_not_only_by_weak_metrics")
     elif primary == "theme_sentiment":
         contract.extend(
             [
@@ -541,6 +619,7 @@ def infer_request_contract(
             [
                 "name_themes_with_strongest_attention",
                 "use_post_metrics_and_comments",
+                "show_themes_first_posts_as_supporting_evidence",
             ]
         )
     else:
@@ -581,6 +660,9 @@ def build_answer_strategy(
     if primary == "source_comparison":
         response_shape = "leader_and_laggard_source_then_comparison"
         must_cover = ["top_source", "weak_source", "source_metrics", "subscriber_context"]
+        if "low_subscribers_high_engagement_request" in set(raw_modes):
+            response_shape = "small_audience_high_engagement_sources"
+            must_cover = ["top_source", "subscriber_context", "engagement_gap", "supporting_source_metrics"]
     elif primary == "post_popularity":
         response_shape = "top_posts_then_reasons"
         must_cover = ["leading_posts", "views", "likes_or_reactions", "why_they_win"]
@@ -605,12 +687,15 @@ def build_answer_strategy(
     elif primary == "theme_underperformance":
         response_shape = "weak_themes_then_supporting_posts"
         must_cover = ["weak_themes", "supporting_posts", "low_metrics", "why_themes_fail"]
+        if "theme_low_interest_request" in set(raw_modes):
+            response_shape = "low_interest_themes_then_supporting_posts"
+            must_cover = ["weak_themes", "supporting_posts", "low_attention_signals", "why_interest_is_low"]
     elif primary == "theme_sentiment":
         response_shape = "positive_vs_negative_themes"
         must_cover = ["positive_themes", "negative_themes", "reasons"]
     elif primary == "theme_interest":
-        response_shape = "top_interest_themes"
-        must_cover = ["top_themes", "metrics", "why_interest_is_high"]
+        response_shape = "top_interest_themes_then_supporting_posts"
+        must_cover = ["top_themes", "supporting_posts", "metrics", "why_interest_is_high"]
     elif primary == "topic_report":
         response_shape = "direct_answer_then_thematic_breakdown"
         must_cover = ["direct_answer", "key_themes", "supporting_evidence"]
@@ -667,6 +752,7 @@ def build_prompt_intent(prompt_text: str | None, has_explicit_scope: bool = Fals
         "post_popularity",
         "post_underperformance",
         "post_sentiment",
+        "theme_interest",
         "theme_popularity",
         "theme_underperformance",
     } or (generic_reaction_question and not focus_terms)
@@ -714,6 +800,7 @@ def apply_analysis_mode_override(
         "post_popularity",
         "post_underperformance",
         "post_sentiment",
+        "theme_interest",
         "theme_popularity",
         "theme_underperformance",
     }
@@ -734,15 +821,18 @@ def determine_primary_mode(raw_modes: list[str], analysis_axes: list[str], has_e
     mode_set = set(raw_modes)
     primary_candidates: list[str] = []
     has_explicit_post_sentiment = bool({"most_negative_post", "most_positive_post"} & mode_set)
+    single_post_reaction_request = bool("reaction_analysis" in mode_set and ("specific_news_answer" in mode_set or has_explicit_scope))
 
     if "excel_export" in mode_set:
         primary_candidates.append("excel_export")
-    if "source_comparison" in mode_set:
+    if "source_comparison" in mode_set or "low_subscribers_high_engagement_request" in mode_set:
         primary_candidates.append("source_comparison")
     if {"least_reacted_post", "least_viewed_post", "underperforming_posts_bucket"} & mode_set:
         primary_candidates.append("post_underperformance")
-    if {"most_negative_post", "most_positive_post"} & mode_set:
+    if {"most_negative_post", "most_positive_post"} & mode_set or single_post_reaction_request:
         primary_candidates.append("post_sentiment")
+    if "theme_low_interest_request" in mode_set:
+        primary_candidates.append("theme_underperformance")
     if "theme_underperformance_ranked" in mode_set:
         primary_candidates.append("theme_underperformance")
     if "theme_popularity_ranked" in mode_set:
@@ -765,12 +855,16 @@ def determine_primary_mode(raw_modes: list[str], analysis_axes: list[str], has_e
         "polarization_analysis",
     }
     if ranking_modes & mode_set or (
-        "specific_news_answer" in mode_set and not (sentiment_modes & mode_set) and not has_explicit_post_sentiment
+        "specific_news_answer" in mode_set
+        and "reaction_analysis" not in mode_set
+        and "interest_analysis" not in mode_set
+        and not (sentiment_modes & mode_set)
+        and not has_explicit_post_sentiment
     ):
         primary_candidates.append("post_popularity")
     if sentiment_modes & mode_set and not has_explicit_post_sentiment:
         primary_candidates.append("theme_sentiment")
-    if "reaction_analysis" in mode_set and not has_explicit_post_sentiment:
+    if "reaction_analysis" in mode_set and not has_explicit_post_sentiment and not single_post_reaction_request:
         primary_candidates.append("theme_sentiment")
     if "interest_analysis" in mode_set:
         primary_candidates.append("theme_interest")
@@ -813,8 +907,9 @@ def determine_primary_mode(raw_modes: list[str], analysis_axes: list[str], has_e
 def determine_secondary_modes(raw_modes: list[str], primary_mode: str, has_explicit_scope: bool) -> list[str]:
     raw_set = set(raw_modes)
     secondary: list[str] = []
+    single_post_reaction_request = bool("reaction_analysis" in raw_set and ("specific_news_answer" in raw_set or has_explicit_scope))
 
-    if primary_mode != "source_comparison" and "source_comparison" in raw_set:
+    if primary_mode != "source_comparison" and ("source_comparison" in raw_set or "low_subscribers_high_engagement_request" in raw_set):
         secondary.append("source_comparison")
     if primary_mode != "post_popularity" and {
         "most_discussed_news",
@@ -832,11 +927,11 @@ def determine_secondary_modes(raw_modes: list[str], primary_mode: str, has_expli
         "underperforming_posts_bucket",
     } & raw_set:
         secondary.append("post_underperformance")
-    if primary_mode != "post_sentiment" and {"most_negative_post", "most_positive_post"} & raw_set:
+    if primary_mode != "post_sentiment" and ({"most_negative_post", "most_positive_post"} & raw_set or single_post_reaction_request):
         secondary.append("post_sentiment")
     if primary_mode != "theme_popularity" and "theme_popularity_ranked" in raw_set:
         secondary.append("theme_popularity")
-    if primary_mode != "theme_underperformance" and "theme_underperformance_ranked" in raw_set:
+    if primary_mode != "theme_underperformance" and ({"theme_underperformance_ranked", "theme_low_interest_request"} & raw_set):
         secondary.append("theme_underperformance")
     if primary_mode != "theme_sentiment" and {
         "negative_analysis",
@@ -846,7 +941,7 @@ def determine_secondary_modes(raw_modes: list[str], primary_mode: str, has_expli
         "complaints_analysis",
         "concerns_analysis",
         "polarization_analysis",
-    } & raw_set:
+    } & raw_set and not single_post_reaction_request:
         secondary.append("theme_sentiment")
     if primary_mode != "theme_interest" and "interest_analysis" in raw_set:
         secondary.append("theme_interest")

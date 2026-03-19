@@ -71,7 +71,14 @@ class ReportAggregator:
                 requested_item_count = 1
             elif "source_comparison" in prompt_modes:
                 requested_item_count = 3
-            elif {"interest_analysis", "theme_popularity_ranked", "theme_underperformance_ranked", "negative_analysis", "positive_analysis"} & prompt_modes:
+            elif {
+                "interest_analysis",
+                "theme_popularity_ranked",
+                "theme_underperformance_ranked",
+                "theme_low_interest_request",
+                "negative_analysis",
+                "positive_analysis",
+            } & prompt_modes:
                 requested_item_count = 5
         requested_source_metric = infer_source_metric(run.prompt_text) if "source_comparison" in prompt_modes else None
         requested_success_bucket_percent = (
@@ -160,6 +167,18 @@ class ReportAggregator:
         total_posts = len(post_scores)
         total_comments_base = max(total_comments, 1)
         ranking_limit = max(5, requested_item_count or 0)
+        metric_source_values = list(post_scores.values())
+        metric_denominator = max(len(metric_source_values), 1)
+        avg_views = sum(int(value.get("views_count", 0) or 0) for value in metric_source_values) / metric_denominator
+        avg_likes = sum(int(value.get("likes_count", 0) or 0) for value in metric_source_values) / metric_denominator
+        avg_comments = (
+            sum(
+                int(value.get("platform_comments_count", value.get("comments_count", 0)) or 0)
+                for value in metric_source_values
+            )
+            / metric_denominator
+        )
+        avg_reposts = sum(int(value.get("reposts_count", 0) or 0) for value in metric_source_values) / metric_denominator
 
         topics = [
             {"name": name, "count": count, "share": round(count / total_comments_base, 2)}
@@ -191,14 +210,35 @@ class ReportAggregator:
             "neutral_comments": self._pick_examples(working_set, "neutral"),
         }
 
+        def normalize_metric(metric_value: int, average_value: float) -> float:
+            if metric_value <= 0:
+                return 0.0
+            baseline = average_value if average_value > 0 else 1.0
+            return metric_value / baseline
+
         def success_score(value: dict) -> float:
             views = int(value.get("views_count", 0) or 0)
             likes = int(value.get("likes_count", 0) or 0)
             comments = int(value.get("platform_comments_count", value.get("comments_count", 0)) or 0)
             reposts = int(value.get("reposts_count", 0) or 0)
-            if views > 0:
-                return round(views + likes * 40 + comments * 12 + reposts * 20, 2)
-            return round(likes * 50 + comments * 15 + reposts * 20, 2)
+            positive_comments = int(value.get("positive_relevant_comments_count", 0) or 0)
+            negative_comments = int(value.get("negative_relevant_comments_count", 0) or 0)
+            signed_discussion = positive_comments + negative_comments
+            positive_balance = (
+                (positive_comments - negative_comments) / signed_discussion
+                if signed_discussion > 0
+                else 0.0
+            )
+            score = (
+                normalize_metric(views, avg_views) * 0.36
+                + normalize_metric(likes, avg_likes) * 0.28
+                + normalize_metric(comments, avg_comments) * 0.21
+                + normalize_metric(reposts, avg_reposts) * 0.15
+                + positive_balance * 0.45
+            )
+            if positive_comments > negative_comments and positive_comments > 0:
+                score += 0.15
+            return round(score, 4)
 
         def popularity_key(value: dict) -> tuple[int, int, int, int]:
             return (
@@ -402,8 +442,30 @@ class ReportAggregator:
 
         success_bucket_share = (requested_success_bucket_percent or 20) / 100
         top_bucket_count = max(1, ceil(len(post_items) * success_bucket_share)) if post_items else 0
-        success_leaders = sorted(post_items, key=popularity_key, reverse=True)[:top_bucket_count]
-        success_trailers = sorted(post_items, key=popularity_key)[:top_bucket_count]
+        success_ranked = sorted(
+            post_items,
+            key=lambda item: (
+                float(item.get("score", 0) or 0),
+                int(item.get("views_count", 0) or 0),
+                int(item.get("likes_count", 0) or 0),
+                int(item.get("comments_count", 0) or 0),
+                int(item.get("reposts_count", 0) or 0),
+            ),
+            reverse=True,
+        )
+        success_ranked_bottom = list(reversed(success_ranked))
+
+        if "successful_post_request" in prompt_modes and "successful_posts_request" not in prompt_modes:
+            success_leaders = success_ranked[:1]
+        elif "successful_posts_request" in prompt_modes:
+            success_leaders = success_ranked[: max(1, requested_item_count or 5)]
+        else:
+            success_leaders = success_ranked[:top_bucket_count]
+
+        if {"successful_posts_bucket", "underperforming_posts_bucket"} & prompt_modes:
+            success_trailers = success_ranked_bottom[:top_bucket_count]
+        else:
+            success_trailers = success_ranked_bottom[: max(1, min(requested_item_count or 3, len(success_ranked_bottom) or 1))]
 
         report = {
             "meta": {

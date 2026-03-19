@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 METRIC_ONLY_MODES = {"source_comparison", "post_popularity", "post_underperformance"}
 THEME_MODES = {"theme_sentiment", "theme_interest", "theme_popularity", "theme_underperformance"}
-COMMENT_MODES = {"post_sentiment", "theme_sentiment", "theme_interest", "topic_report"}
+COMMENT_MODES = {"post_sentiment", "theme_sentiment", "topic_report"}
 
 EXPLANATION_RE = re.compile(
     r"(почему|объясни|объяснение|что люди думают|что думает аудитория|как аудитория|с чем связано|за счет чего)"
@@ -86,6 +86,14 @@ SEMANTIC_TEMPLATES = [
         "needs_comment_analysis": False,
         "needs_theme_analysis": False,
         "reason": "source_metrics_request",
+    },
+    {
+        "prompt": "какой канал лучше",
+        "mode": "source_comparison",
+        "needs_llm_reasoning": False,
+        "needs_comment_analysis": False,
+        "needs_theme_analysis": False,
+        "reason": "source_comparison_request",
     },
     {
         "prompt": "какой пост самый успешный",
@@ -163,7 +171,7 @@ SEMANTIC_TEMPLATES = [
         "prompt": "какие темы собирают больше всего интереса аудитории",
         "mode": "theme_interest",
         "needs_llm_reasoning": True,
-        "needs_comment_analysis": True,
+        "needs_comment_analysis": False,
         "needs_theme_analysis": True,
         "reason": "theme_interest_request",
     },
@@ -171,9 +179,57 @@ SEMANTIC_TEMPLATES = [
         "prompt": "что сейчас сильнее всего цепляет людей",
         "mode": "theme_interest",
         "needs_llm_reasoning": True,
-        "needs_comment_analysis": True,
+        "needs_comment_analysis": False,
         "needs_theme_analysis": True,
         "reason": "theme_interest_request",
+    },
+    {
+        "prompt": "какие темы не вызывают интерес",
+        "mode": "theme_underperformance",
+        "needs_llm_reasoning": True,
+        "needs_comment_analysis": False,
+        "needs_theme_analysis": True,
+        "reason": "theme_low_interest_request",
+    },
+    {
+        "prompt": "покажи тройку самых популярных тем",
+        "mode": "theme_popularity",
+        "needs_llm_reasoning": True,
+        "needs_comment_analysis": False,
+        "needs_theme_analysis": True,
+        "reason": "popular_themes_request",
+    },
+    {
+        "prompt": "какие темы не вызывают интерес у аудитории",
+        "mode": "theme_underperformance",
+        "needs_llm_reasoning": True,
+        "needs_comment_analysis": False,
+        "needs_theme_analysis": True,
+        "reason": "theme_low_interest_request",
+    },
+    {
+        "prompt": "что людям ваще заходит",
+        "mode": "theme_interest",
+        "needs_llm_reasoning": True,
+        "needs_comment_analysis": False,
+        "needs_theme_analysis": True,
+        "reason": "theme_interest_request",
+    },
+    {
+        "prompt": "какие посты про московскую неделю моды самые популярные",
+        "mode": "post_popularity",
+        "needs_llm_reasoning": False,
+        "needs_comment_analysis": False,
+        "needs_theme_analysis": False,
+        "reason": "scoped_popular_posts_request",
+    },
+    {
+        "prompt": "у какого источника меньше подписчиков но выше вовлеченность",
+        "mode": "source_comparison",
+        "needs_llm_reasoning": False,
+        "needs_comment_analysis": False,
+        "needs_theme_analysis": False,
+        "reason": "low_subscribers_high_engagement_request",
     },
     {
         "prompt": "выдели 5 самые популярные темы",
@@ -280,6 +336,18 @@ class PromptRouter:
                 intent=intent,
             )
 
+        if "low_subscribers_high_engagement_request" in prompt_modes:
+            return PromptRoute(
+                analysis_mode="source_comparison",
+                needs_llm_reasoning=False,
+                needs_comment_analysis=False,
+                needs_theme_analysis=False,
+                confidence=0.97,
+                router_source="rule",
+                reason="low_subscribers_high_engagement_request",
+                intent=intent,
+            )
+
         if intent.primary_mode in METRIC_ONLY_MODES and has_metric_terms and not has_explanation and not has_comment_terms and not has_theme_terms:
             return PromptRoute(
                 analysis_mode=intent.primary_mode,
@@ -317,12 +385,30 @@ class PromptRouter:
                 intent=intent,
             )
 
+        if "theme_low_interest_request" in prompt_modes:
+            return PromptRoute(
+                analysis_mode="theme_underperformance",
+                needs_llm_reasoning=True,
+                needs_comment_analysis=has_comment_terms or has_explanation,
+                needs_theme_analysis=True,
+                confidence=0.92,
+                router_source="rule",
+                reason="theme_low_interest_request",
+                intent=intent,
+            )
+
         if intent.primary_mode in THEME_MODES:
+            is_interest_request = intent.primary_mode == "theme_interest"
             confidence = 0.92 if ({"interest_analysis", "negative_analysis", "positive_analysis", "theme_analysis"} & prompt_modes) else (0.88 if has_theme_terms else 0.74)
             return PromptRoute(
                 analysis_mode=intent.primary_mode,
                 needs_llm_reasoning=True,
-                needs_comment_analysis=intent.primary_mode in {"theme_sentiment", "theme_interest"} or has_comment_terms or has_explanation,
+                needs_comment_analysis=(
+                    intent.primary_mode == "theme_sentiment"
+                    or has_comment_terms
+                    or has_explanation
+                    or (is_interest_request and "reaction_analysis" in prompt_modes)
+                ),
                 needs_theme_analysis=True,
                 confidence=confidence,
                 router_source="rule",
@@ -483,6 +569,8 @@ class PromptRouter:
             return False
         if mode in COMMENT_MODES:
             return True
+        if mode == "theme_interest":
+            return has_explanation or has_comment_terms
         return has_explanation or has_comment_terms
 
     def _needs_theme_analysis(self, mode: str, has_theme_terms: bool) -> bool:

@@ -52,23 +52,24 @@ const REQUESTED_COUNT_WORDS: Record<string, number> = {
   девяти: 9,
   десять: 10,
   десяти: 10,
+  пара: 2,
+  пару: 2,
+  двойка: 2,
+  двойку: 2,
+  двойке: 2,
+  тройка: 3,
+  тройку: 3,
+  тройке: 3,
+  пятерка: 5,
+  "пятёрка": 5,
+  пятерку: 5,
+  "пятёрку": 5,
+  пятерке: 5,
+  "пятёрке": 5,
+  десятка: 10,
+  десятку: 10,
+  десятке: 10,
 };
-
-Object.assign(REQUESTED_COUNT_WORDS, {
-  "РїР°СЂР°": 2,
-  "РїР°СЂСѓ": 2,
-  "РґРІРѕР№РєР°": 2,
-  "РґРІРѕР№РєСѓ": 2,
-  "С‚СЂРѕР№РєР°": 3,
-  "С‚СЂРѕР№РєСѓ": 3,
-  "С‚СЂРѕР№РєРµ": 3,
-  "РїСЏС‚РµСЂРєР°": 5,
-  "РїСЏС‚С‘СЂРєР°": 5,
-  "РїСЏС‚РµСЂРєСѓ": 5,
-  "РїСЏС‚С‘СЂРєСѓ": 5,
-  "РґРµСЃСЏС‚РєР°": 10,
-  "РґРµСЃСЏС‚РєСѓ": 10,
-});
 
 const REQUESTED_COUNT_WORD_PATTERN = Object.keys(REQUESTED_COUNT_WORDS)
   .sort((left, right) => right.length - left.length)
@@ -410,12 +411,27 @@ function getThemeCardConfig(report: ReportSnapshot["report_json"], mode: Analysi
   }
 
   if (mode === "theme_underperformance") {
-    const items = [...baseItems].sort((left, right) => getThemeSuccessScore(left) - getThemeSuccessScore(right));
+    const wantsLowInterest = promptModes.has("theme_low_interest_request");
+    const items = [...baseItems].sort((left, right) =>
+      wantsLowInterest
+        ? getThemeInterestScore(left) - getThemeInterestScore(right)
+        : getThemeSuccessScore(left) - getThemeSuccessScore(right)
+    );
     return {
-      title: displayCount ? `Топ ${displayCount} непопулярных тем` : "Непопулярные темы",
-      description: "Темы ранжированы по самым слабым метрикам ведущих постов внутри текущего среза.",
+      title: wantsLowInterest
+        ? displayCount
+          ? `Топ ${displayCount} тем с самым низким интересом`
+          : "Темы с самым низким интересом"
+        : displayCount
+          ? `Топ ${displayCount} непопулярных тем`
+          : "Непопулярные темы",
+      description: wantsLowInterest
+        ? "Темы ранжированы по самому низкому вниманию аудитории: по обсуждению, просмотрам, лайкам или реакциям и репостам."
+        : "Темы ранжированы по самым слабым метрикам ведущих постов внутри текущего среза.",
       items: items.slice(0, displayCount),
-      emptyText: "Для выбранного запроса пока не удалось выделить непопулярные темы.",
+      emptyText: wantsLowInterest
+        ? "Для выбранного запроса пока не удалось выделить темы с устойчиво низким интересом аудитории."
+        : "Для выбранного запроса пока не удалось выделить непопулярные темы.",
     };
   }
 
@@ -619,10 +635,10 @@ function getPostSections(report: ReportSnapshot["report_json"], mode: AnalysisMo
         {
           title:
             promptModes.has("successful_post_request") && !promptModes.has("successful_posts_request")
-              ? "РЎР°РјС‹Р№ СѓСЃРїРµС€РЅС‹Р№ РїРѕСЃС‚"
-              : "РЎР°РјС‹Рµ СѓСЃРїРµС€РЅС‹Рµ РїРѕСЃС‚С‹",
+              ? "Самый успешный пост"
+              : "Самые успешные посты",
           description:
-            "РџРѕСЃС‚С‹ СЂР°РЅР¶РёСЂРѕРІР°РЅС‹ РїРѕ СЃРѕРІРѕРєСѓРїРЅРѕСЃС‚Рё РјРµС‚СЂРёРє РѕС‚РЅРѕСЃРёС‚РµР»СЊРЅРѕ СЃСЂРµРґРЅРµРіРѕ СѓСЂРѕРІРЅСЏ РїРѕ РїСЂРѕРµРєС‚Сѓ. Р”РѕРїРѕР»РЅРёС‚РµР»СЊРЅРѕ СѓС‡РёС‚С‹РІР°РµС‚СЃСЏ РѕР±С‰Р°СЏ СЂРµР°РєС†РёСЏ Р°СѓРґРёС‚РѕСЂРёРё РІ РєРѕРјРјРµРЅС‚Р°СЂРёСЏС….",
+            "Посты ранжированы по совокупности метрик относительно среднего уровня по проекту. Дополнительно учитывается общая реакция аудитории в комментариях.",
           posts: postGroups.success_top_bucket || [],
         },
       ];
