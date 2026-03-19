@@ -21,7 +21,7 @@ function getConfidenceLabel(level: "high" | "medium" | "low") {
 }
 
 function getEngagementLabel(item: ThemeReactionItem) {
-  const platform = (item.platform || item.leading_post.platform || "").toLowerCase();
+  const platform = (item.platform || item.leading_post?.platform || "").toLowerCase();
   return platform === "telegram" ? "реакций" : "лайков";
 }
 
@@ -69,7 +69,7 @@ export function ThemeReactionCard({
           <div className="space-y-3">
             {items.map((item) => (
               <div
-                key={`${item.theme}-${item.leading_post.post_id || item.leading_post.post_url || "theme"}`}
+                key={`${item.theme}-${item.leading_post?.post_id || item.leading_post?.post_url || "theme"}`}
                 className="rounded-2xl border border-border/60 bg-background/50 p-4"
               >
                 <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
@@ -105,9 +105,9 @@ export function ThemeReactionCard({
                 <div className="mt-3 rounded-xl border border-border/50 bg-background/35 px-3 py-3">
                   <div className="text-xs uppercase tracking-wide text-muted-foreground">Ведущий пост по теме</div>
                   <div className="mt-2 text-sm leading-6 text-foreground/92">
-                    {item.leading_post.post_text || "Нет текста поста"}
+                    {item.leading_post?.post_text || "Нет текста поста"}
                   </div>
-                  {item.leading_post.post_url ? (
+                  {item.leading_post?.post_url ? (
                     <a
                       href={item.leading_post.post_url}
                       target="_blank"

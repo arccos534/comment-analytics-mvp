@@ -280,6 +280,10 @@ function getThemeInterestScore(item: ThemeReactionItem): number {
   );
 }
 
+function getThemeItems(report: ReportSnapshot["report_json"]): ThemeReactionItem[] {
+  return Array.isArray(report.summary.theme_reaction_map) ? report.summary.theme_reaction_map : [];
+}
+
 function getPostInterestScore(post: ReportPost): number {
   return (
     Number(post.comments_count || 0) * 4 +
@@ -311,7 +315,7 @@ function getThemeSupportingPosts(report: ReportSnapshot["report_json"], mode: An
   const items: ReportPost[] = [];
   const themeItems = getThemeCardConfig(report, mode).items;
   themeItems.forEach((item) => {
-    pushUniquePost(items, item.leading_post);
+    pushUniquePost(items, item?.leading_post && typeof item.leading_post === "object" ? item.leading_post : null);
   });
   if (items.length) {
     return items;
@@ -370,7 +374,7 @@ function isMetricMode(mode: AnalysisMode) {
 }
 
 function getThemeCardConfig(report: ReportSnapshot["report_json"], mode: AnalysisMode): ThemeCardConfig {
-  const baseItems = [...(report.summary.theme_reaction_map || [])];
+  const baseItems = [...getThemeItems(report)];
   const promptModes = new Set(report.summary.prompt_modes || []);
   const displayCount = getDisplayCount(report, mode);
 
