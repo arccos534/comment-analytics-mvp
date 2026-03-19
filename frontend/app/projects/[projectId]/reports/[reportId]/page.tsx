@@ -54,6 +54,22 @@ const REQUESTED_COUNT_WORDS: Record<string, number> = {
   десяти: 10,
 };
 
+Object.assign(REQUESTED_COUNT_WORDS, {
+  "РїР°СЂР°": 2,
+  "РїР°СЂСѓ": 2,
+  "РґРІРѕР№РєР°": 2,
+  "РґРІРѕР№РєСѓ": 2,
+  "С‚СЂРѕР№РєР°": 3,
+  "С‚СЂРѕР№РєСѓ": 3,
+  "С‚СЂРѕР№РєРµ": 3,
+  "РїСЏС‚РµСЂРєР°": 5,
+  "РїСЏС‚С‘СЂРєР°": 5,
+  "РїСЏС‚РµСЂРєСѓ": 5,
+  "РїСЏС‚С‘СЂРєСѓ": 5,
+  "РґРµСЃСЏС‚РєР°": 10,
+  "РґРµСЃСЏС‚РєСѓ": 10,
+});
+
 const REQUESTED_COUNT_WORD_PATTERN = Object.keys(REQUESTED_COUNT_WORDS)
   .sort((left, right) => right.length - left.length)
   .join("|");
@@ -317,13 +333,18 @@ function getThemeSupportingPosts(report: ReportSnapshot["report_json"], mode: An
   themeItems.forEach((item) => {
     pushUniquePost(items, item?.leading_post && typeof item.leading_post === "object" ? item.leading_post : null);
   });
+  (report.summary.focus_evidence || []).forEach((item) => {
+    pushUniquePost(items, item?.post && typeof item.post === "object" ? item.post : null);
+  });
   if (items.length) {
     return items;
   }
 
   const fallbackPosts = [
     ...(report.posts.top_discussed || []),
+    ...(report.posts.top_reacted || []),
     ...(report.posts.top_popular || []),
+    ...(report.posts.success_top_bucket || []),
     ...(report.posts.matched || []),
   ]
     .filter(Boolean)
@@ -491,7 +512,9 @@ function getTakeawayLinks(report: ReportSnapshot["report_json"], mode: AnalysisM
   }
 
   if (mode === "post_popularity") {
-    if (promptModes.has("most_reacted_post")) {
+    if (promptModes.has("successful_post_request") || promptModes.has("successful_posts_request")) {
+      pushTopPostLinks(report.posts.success_top_bucket, displayCount);
+    } else if (promptModes.has("most_reacted_post")) {
       pushUniqueLink("Source post", report.posts.top_reacted);
     } else if (promptModes.has("most_viewed_post")) {
       const posts = [...(report.posts.top_popular || [])].sort(
@@ -559,6 +582,10 @@ function getTakeawayLinks(report: ReportSnapshot["report_json"], mode: AnalysisM
   if (["theme_sentiment", "theme_interest", "theme_popularity", "theme_underperformance"].includes(mode)) {
     const supportingPosts = getThemeSupportingPosts(report, mode);
     pushTopPostLinks(supportingPosts, Math.min(displayCount, 3));
+    if (!links.length) {
+      const fallbackPost = getSingleFocusPost(report);
+      pushUniqueUrl("Source post", fallbackPost?.post_url);
+    }
   }
 
   if (links.length !== 1) {
@@ -575,6 +602,8 @@ function getPostSections(report: ReportSnapshot["report_json"], mode: AnalysisMo
   const promptModes = new Set(report.summary.prompt_modes || []);
   const showSuccessTopBucket = promptModes.has("successful_posts_bucket");
   const showSuccessBottomBucket = promptModes.has("underperforming_posts_bucket");
+  const showSuccessfulPosts =
+    promptModes.has("successful_post_request") || promptModes.has("successful_posts_request");
   const successBucketPercent = getSuccessBucketPercent(report);
   const successBucketLabel = `${successBucketPercent}%`;
   const topPositivePosts = report.summary.top_positive_posts || [];
@@ -585,6 +614,20 @@ function getPostSections(report: ReportSnapshot["report_json"], mode: AnalysisMo
   }
 
   if (mode === "post_popularity") {
+    if (showSuccessfulPosts) {
+      return [
+        {
+          title:
+            promptModes.has("successful_post_request") && !promptModes.has("successful_posts_request")
+              ? "РЎР°РјС‹Р№ СѓСЃРїРµС€РЅС‹Р№ РїРѕСЃС‚"
+              : "РЎР°РјС‹Рµ СѓСЃРїРµС€РЅС‹Рµ РїРѕСЃС‚С‹",
+          description:
+            "РџРѕСЃС‚С‹ СЂР°РЅР¶РёСЂРѕРІР°РЅС‹ РїРѕ СЃРѕРІРѕРєСѓРїРЅРѕСЃС‚Рё РјРµС‚СЂРёРє РѕС‚РЅРѕСЃРёС‚РµР»СЊРЅРѕ СЃСЂРµРґРЅРµРіРѕ СѓСЂРѕРІРЅСЏ РїРѕ РїСЂРѕРµРєС‚Сѓ. Р”РѕРїРѕР»РЅРёС‚РµР»СЊРЅРѕ СѓС‡РёС‚С‹РІР°РµС‚СЃСЏ РѕР±С‰Р°СЏ СЂРµР°РєС†РёСЏ Р°СѓРґРёС‚РѕСЂРёРё РІ РєРѕРјРјРµРЅС‚Р°СЂРёСЏС….",
+          posts: postGroups.success_top_bucket || [],
+        },
+      ];
+    }
+
     return [
       {
         title: "Лидеры по лайкам и реакциям",
@@ -667,7 +710,7 @@ function getPostSections(report: ReportSnapshot["report_json"], mode: AnalysisMo
         {
           title: "Поддерживающие посты по интересу аудитории",
           description: "Публикации, которые лучше всего подтверждают, какие сюжеты сильнее всего притягивают внимание аудитории.",
-          posts: getThemeSupportingPosts(report, mode).slice(0, 3),
+          posts: getThemeSupportingPosts(report, mode).slice(0, Math.max(3, getDisplayCount(report, mode))),
         },
       ];
     }
@@ -758,6 +801,22 @@ export default function ReportPage({ params }: { params: { projectId: string; re
     clearPendingAnalysisRequest(params.projectId);
   }, [params.projectId, params.reportId, runQuery.data?.status]);
 
+  useEffect(() => {
+    const report = reportQuery.data?.report_json;
+    if (!report) {
+      return;
+    }
+
+    const analysisMode = getAnalysisMode(report);
+    const defaultCount = String(getDisplayCount(report, analysisMode));
+    if (postsLimit !== defaultCount) {
+      setPostsLimit(defaultCount);
+    }
+    if (["post_popularity", "post_underperformance", "mixed", "theme_interest"].includes(analysisMode)) {
+      setShowPostPanels(true);
+    }
+  }, [postsLimit, reportQuery.data]);
+
   if (runQuery.isLoading) {
     return <div>Загрузка анализа...</div>;
   }
@@ -800,18 +859,9 @@ export default function ReportPage({ params }: { params: { projectId: string; re
   const showTopicsCard = analysisMode === "topic_report" && report.topics.length > 0;
   const showThemeCard = hasThemes && isThemeMode(analysisMode);
   const showGenericComments = analysisMode === "topic_report" && hasComments && commentSections.length === 0;
-  const showPostPanelsToggle = postSections.length > 0;
+  const alwaysShowPostPanels = analysisMode === "theme_interest" && postSections.length > 0;
+  const showPostPanelsToggle = postSections.length > 0 && !alwaysShowPostPanels;
   const topGridClass = isSourceMode ? "xl:grid-cols-[1.2fr_0.8fr]" : showTopicsCard ? "xl:grid-cols-2" : "xl:grid-cols-1";
-
-  useEffect(() => {
-    const defaultCount = String(getDisplayCount(report, analysisMode));
-    if (postsLimit !== defaultCount) {
-      setPostsLimit(defaultCount);
-    }
-    if (["post_popularity", "post_underperformance", "mixed", "theme_interest"].includes(analysisMode)) {
-      setShowPostPanels(true);
-    }
-  }, [analysisMode, postsLimit, report]);
 
   return (
     <div className="space-y-8">
@@ -849,6 +899,19 @@ export default function ReportPage({ params }: { params: { projectId: string; re
           description={themeCard.description}
           emptyText={themeCard.emptyText}
         />
+      ) : null}
+
+      {alwaysShowPostPanels ? (
+        <div className="grid gap-5 xl:grid-cols-3">
+          {postSections.map((section) => (
+            <TopPostsCard
+              key={section.title}
+              title={section.title}
+              description={section.description}
+              posts={section.posts.slice(0, visibleLimit)}
+            />
+          ))}
+        </div>
       ) : null}
 
       {commentSections.length ? (

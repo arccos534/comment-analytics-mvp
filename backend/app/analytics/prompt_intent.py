@@ -121,8 +121,18 @@ PRIMARY_MODE_PRIORITY = [
 RAW_MODE_PATTERNS: list[tuple[str, str]] = [
     (r"(excel|эксель|xlsx|таблиц)", "excel_export"),
     (r"(в каком канале|какой канал|какое сообщество|какой источник)", "source_comparison"),
+    (r"(какой канал лучше|какой источник лучше|какое сообщество лучше)", "source_comparison"),
     (r"(сравн\w*).*(канал|сообщество|источник)", "source_comparison"),
     (r"(подписчик|размер аудитории|активная аудитория|активность аудитории)", "source_comparison"),
+    (
+        r"(какой|какая).*(пост|новост|публикац).*(сам\w*|наиболее).*(успешн|сильн|лучш)",
+        "successful_post_request",
+    ),
+    (
+        r"(какие|покажи|выдели|найди).*(лучши|сильн|успешн).*(пост|публикац)",
+        "successful_posts_request",
+    ),
+    (r"(пост|публикац).*(лучши|сильн|успешн)", "successful_posts_request"),
     (
         r"(какая|какой|какие).*(новост|пост|публикац).*(больше|сильн|максим|сам|наибольш|наиболее).*(негатив|критик|жалоб|хуже)",
         "most_negative_post",
@@ -133,6 +143,9 @@ RAW_MODE_PATTERNS: list[tuple[str, str]] = [
         "most_positive_post",
     ),
     (r"(позитив|положит|поддерж|одобр).*(новост|пост|публикац).*(больше|сильн|максим|сам)", "most_positive_post"),
+    (r"(какая новость вызвала лучш\w+ реакц)", "most_positive_post"),
+    (r"(какой пост лучше всего заш[её]л аудитории|какой пост лучше всего зашел аудитории)", "most_positive_post"),
+    (r"(лучше всего заш[её]л аудитории|лучше всего зашел аудитории|заш[её]л аудитории)", "most_positive_post"),
     (r"(сам\w+\s+обсуждаем|наиболее\s+обсуждаем)", "most_discussed_news"),
     (r"(больше всего|наибольш\w*|максимальн\w*).*(реакц|лайк)", "most_reacted_post"),
     (r"(реакц|лайк).*(больше всего|наибольш\w*|максимальн\w*)", "most_reacted_post"),
@@ -150,7 +163,8 @@ RAW_MODE_PATTERNS: list[tuple[str, str]] = [
     (r"(тем|сюжет).*((?<!не)популярн|успешн|сильн)", "theme_popularity_ranked"),
     (r"(\d+\s+)?(сам\w+\s+)?(непопулярн|слаб|худш).*(тем|сюжет)", "theme_underperformance_ranked"),
     (r"(тем|сюжет).*(непопулярн|слаб|худш)", "theme_underperformance_ranked"),
-    (r"(интерес|вовлеч|резонанс)", "interest_analysis"),
+    (r"(что сейчас сильнее всего цепля\w+ людей|что сильнее всего цепля\w+ людей|что людей цепля\w+)", "interest_analysis"),
+    (r"(интерес|вовлеч|резонанс|цепля\w+)", "interest_analysis"),
     (r"(негатив|негативн|критик|возмущ|раздраж)", "negative_analysis"),
     (r"(позитив|положит|нрав|одобр|поддерж)", "positive_analysis"),
     (r"(что|как|какие).*(люди|аудитория).*(думают|относятся|воспринимают|реагируют)", "reaction_analysis"),
@@ -224,6 +238,19 @@ REQUESTED_COUNT_WORDS: dict[str, int] = {
     "девяти": 9,
     "десять": 10,
     "десяти": 10,
+    "пара": 2,
+    "пару": 2,
+    "двойка": 2,
+    "двойку": 2,
+    "тройка": 3,
+    "тройку": 3,
+    "тройке": 3,
+    "пятерка": 5,
+    "пятёрка": 5,
+    "пятерку": 5,
+    "пятёрку": 5,
+    "десятка": 10,
+    "десятку": 10,
 }
 
 REQUESTED_COUNT_WORD_PATTERN = "|".join(
@@ -462,6 +489,13 @@ def infer_request_contract(
                 "comments_are_secondary",
             ]
         )
+        if {"successful_post_request", "successful_posts_request"} & set(raw_modes):
+            contract.extend(
+                [
+                    "score_success_relative_to_project_average",
+                    "include_audience_opinion_for_leading_posts",
+                ]
+            )
     elif primary == "post_underperformance":
         contract.extend(
             [
@@ -550,6 +584,15 @@ def build_answer_strategy(
     elif primary == "post_popularity":
         response_shape = "top_posts_then_reasons"
         must_cover = ["leading_posts", "views", "likes_or_reactions", "why_they_win"]
+        if {"successful_post_request", "successful_posts_request"} & set(raw_modes):
+            response_shape = "successful_posts_then_audience_opinion"
+            must_cover = [
+                "leading_posts",
+                "relative_success_against_average",
+                "views",
+                "likes_or_reactions",
+                "audience_opinion",
+            ]
     elif primary == "post_underperformance":
         response_shape = "weak_posts_then_reasons"
         must_cover = ["weak_posts", "low_metrics", "why_they_lag"]
@@ -710,6 +753,8 @@ def determine_primary_mode(raw_modes: list[str], analysis_axes: list[str], has_e
         "most_reacted_post",
         "most_viewed_post",
         "successful_posts_bucket",
+        "successful_post_request",
+        "successful_posts_request",
     }
     sentiment_modes = {
         "negative_analysis",
@@ -776,6 +821,8 @@ def determine_secondary_modes(raw_modes: list[str], primary_mode: str, has_expli
         "most_reacted_post",
         "most_viewed_post",
         "successful_posts_bucket",
+        "successful_post_request",
+        "successful_posts_request",
         "specific_news_answer",
     } & raw_set:
         secondary.append("post_popularity")

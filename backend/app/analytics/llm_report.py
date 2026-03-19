@@ -1874,6 +1874,10 @@ class SummaryGenerator:
         mode_set = set(prompt_modes or [])
         if primary_mode == "source_comparison":
             return 3
+        if "successful_posts_request" in mode_set:
+            return 5
+        if "successful_post_request" in mode_set:
+            return 1
         if primary_mode in {"theme_sentiment", "theme_interest", "theme_popularity", "theme_underperformance"}:
             return 5
         if primary_mode == "mixed":
@@ -2567,6 +2571,8 @@ class SummaryGenerator:
         least_viewed_posts = payload.get("least_viewed_posts", []) or []
         top_success_posts = payload.get("top_success_posts", []) or []
         bottom_success_posts = payload.get("bottom_success_posts", []) or []
+        heuristic_post_themes = payload.get("heuristic_post_themes", []) or []
+        theme_candidates = derived_post_themes or heuristic_post_themes
         theme_map = payload.get("prompt_related_theme_map", []) or self._filter_prompt_related_themes(
             payload.get("theme_reaction_map", []) or [],
             focus_evidence,
@@ -2810,6 +2816,8 @@ class SummaryGenerator:
         least_viewed_posts = payload.get("least_viewed_posts", []) or []
         top_success_posts = payload.get("top_success_posts", []) or []
         bottom_success_posts = payload.get("bottom_success_posts", []) or []
+        heuristic_post_themes = payload.get("heuristic_post_themes", []) or []
+        theme_candidates = derived_post_themes or heuristic_post_themes
         style_gap = payload.get("style_gap", {}) or {}
         confidence = payload.get("confidence_assessment", {}) or {}
         wants_success_buckets = bool({"successful_posts_bucket", "underperforming_posts_bucket"} & prompt_modes)
@@ -3157,7 +3165,21 @@ class SummaryGenerator:
             return list(dict.fromkeys(item for item in takeaways if item))[:3]
 
         if primary_mode == "post_popularity":
-            if ("most_reacted_post" in prompt_modes or "highest_reactions" in prompt_modes) and top_reacted_posts:
+            if {"successful_post_request", "successful_posts_request"} & prompt_modes and top_success_posts:
+                limit = min(requested_count, 5)
+                if "successful_post_request" in prompt_modes and "successful_posts_request" not in prompt_modes:
+                    lead_post = top_success_posts[0]
+                    takeaways.append(
+                        f"Самым успешным выглядит пост «{lead_post['post_text']}»: {self._format_post_metrics(lead_post, priority='success')}."
+                    )
+                else:
+                    takeaways.append(
+                        f"Самыми успешными постами в текущем срезе выглядят: {self._format_ranked_posts(top_success_posts, 'success', limit)}."
+                    )
+                reason = self._build_post_reason_snippet(top_success_posts[0], "positive").strip()
+                if reason:
+                    takeaways.append(f"Почему эти публикации выглядят сильнее остальных: {reason}")
+            elif ("most_reacted_post" in prompt_modes or "highest_reactions" in prompt_modes) and top_reacted_posts:
                 lead_post = top_reacted_posts[0]
                 takeaways.append(f"Лидер по лайкам или реакциям — пост «{lead_post['post_text']}»: {self._format_post_metrics(lead_post, priority='reactions')}.")
             elif ("most_viewed_post" in prompt_modes or "highest_views" in prompt_modes) and top_viewed_posts:
@@ -3223,6 +3245,14 @@ class SummaryGenerator:
             return list(dict.fromkeys(item for item in takeaways if item))[:3]
 
         if primary_mode == "theme_interest":
+            fallback_interest_posts = self._select_interest_posts(
+                matched_posts,
+                top_discussed_posts,
+                top_reacted_posts,
+                top_viewed_posts,
+                top_success_posts,
+                limit=min(requested_count, 3),
+            )
             if theme_items:
                 theme_slice = theme_items[: min(len(theme_items), requested_count)]
                 takeaways.append(f"Больше всего интереса аудитории собирают темы {self._join_list([item['theme'] for item in theme_slice])}.")
@@ -3233,14 +3263,7 @@ class SummaryGenerator:
                         takeaways.append(f"Почему интерес высокий: {reason}")
                 return list(dict.fromkeys(item for item in takeaways if item))[:3]
 
-            interest_posts = self._select_interest_posts(
-                matched_posts,
-                top_discussed_posts,
-                top_reacted_posts,
-                top_viewed_posts,
-                top_success_posts,
-                limit=min(requested_count, 3),
-            )
+            interest_posts = fallback_interest_posts
             if interest_posts:
                 takeaways.append(
                     f"Устойчивую карту тем пока собрать не удалось, поэтому ближе всего к запросу сейчас посты {self._format_ranked_posts(interest_posts, 'comments', min(requested_count, 3))}."
@@ -3249,6 +3272,42 @@ class SummaryGenerator:
                     reason = self._build_interest_reason_snippet(interest_posts[0]).strip()
                     if reason:
                         takeaways.append(f"Почему аудитория цепляется за эти сюжеты: {reason}")
+                return list(dict.fromkeys(item for item in takeaways if item))[:3]
+
+            if focus_evidence:
+                focus_posts = [item["post"] for item in focus_evidence[: min(requested_count, 3)] if item.get("post")]
+                if focus_posts:
+                    takeaways.append(
+                        f"Ближе всего к запросу сейчас публикации {self._format_ranked_posts(focus_posts, 'comments', min(requested_count, 3))}."
+                    )
+                    if derived_post_themes:
+                        takeaways.append(
+                            f"По самим публикациям заметнее всего темы {self._join_list(derived_post_themes[: min(requested_count, 3)])}."
+                        )
+                    if "causal_explanation" in prompt_modes:
+                        reason = self._build_interest_reason_snippet(focus_posts[0]).strip()
+                        if reason:
+                            takeaways.append(f"Почему именно эти сюжеты тянут внимание: {reason}")
+                    return list(dict.fromkeys(item for item in takeaways if item))[:3]
+
+            if derived_post_themes:
+                takeaways.append(
+                    f"На уровне самих публикаций заметнее всего темы {self._join_list(derived_post_themes[: min(requested_count, 3)])}."
+                )
+                return list(dict.fromkeys(item for item in takeaways if item))[:3]
+
+            if theme_candidates:
+                takeaways.append(
+                    f"РќР° СѓСЂРѕРІРЅРµ СЃР°РјРёС… РїСѓР±Р»РёРєР°С†РёР№ Р·Р°РјРµС‚РЅРµРµ РІСЃРµРіРѕ С‚РµРјС‹ {self._join_list(theme_candidates[: min(requested_count, 3)])}."
+                )
+                if fallback_interest_posts:
+                    takeaways.append(
+                        f"РџРѕРґС‚РІРµСЂР¶РґР°СЋС‰РёРµ РїСѓР±Р»РёРєР°С†РёРё: {self._format_ranked_posts(fallback_interest_posts, 'comments', min(requested_count, 3))}."
+                    )
+                    if "causal_explanation" in prompt_modes:
+                        reason = self._build_interest_reason_snippet(fallback_interest_posts[0]).strip()
+                        if reason:
+                            takeaways.append(f"РџРѕС‡РµРјСѓ СЌС‚Рё СЃСЋР¶РµС‚С‹ СѓРґРµСЂР¶РёРІР°СЋС‚ РІРЅРёРјР°РЅРёРµ: {reason}")
                 return list(dict.fromkeys(item for item in takeaways if item))[:3]
 
         if primary_mode == "theme_popularity" and theme_items:
@@ -3395,7 +3454,22 @@ class SummaryGenerator:
                     paragraphs.append(f"Что люди думают о публикации: {reason}")
 
         elif primary_mode == "post_popularity":
-            if ("most_reacted_post" in prompt_modes or "highest_reactions" in prompt_modes) and top_reacted_posts:
+            if {"successful_post_request", "successful_posts_request"} & prompt_modes and top_success_posts:
+                limit = min(requested_count, 5)
+                if "successful_post_request" in prompt_modes and "successful_posts_request" not in prompt_modes:
+                    lead = top_success_posts[0]
+                    paragraphs.append(
+                        f"Самым успешным постом выглядит «{lead['post_text']}». "
+                        f"Он собрал {self._format_post_metrics(lead, priority='success')}."
+                    )
+                else:
+                    paragraphs.append(
+                        f"К самым успешным постам в текущем срезе относятся: {self._format_ranked_posts(top_success_posts, 'success', limit)}."
+                    )
+                reason = self._build_post_reason_snippet(top_success_posts[0], "positive").strip()
+                if reason:
+                    paragraphs.append(f"Почему эти публикации выглядят сильнее остальных: {reason}")
+            elif ("most_reacted_post" in prompt_modes or "highest_reactions" in prompt_modes) and top_reacted_posts:
                 lead = top_reacted_posts[0]
                 paragraphs.append(
                     f"Постом с самым большим количеством лайков или реакций выглядит «{lead['post_text']}». "
@@ -3507,6 +3581,14 @@ class SummaryGenerator:
                 paragraphs.append("В текущей выборке нет тем с устойчиво позитивной реакцией: позитивные комментарии не перевешивают негативные.")
 
         elif primary_mode == "theme_interest":
+            fallback_interest_posts = self._select_interest_posts(
+                matched_posts,
+                top_discussed_posts,
+                top_reacted_posts,
+                top_viewed_posts,
+                top_success_posts,
+                limit=min(requested_count, 3),
+            )
             if theme_items:
                 theme_slice = theme_items[: min(len(theme_items), requested_count)]
                 paragraphs.append(
@@ -3518,14 +3600,7 @@ class SummaryGenerator:
                     if reason:
                         paragraphs.append(f"Почему именно эти темы тянут внимание аудитории: {reason}")
             else:
-                interest_posts = self._select_interest_posts(
-                    matched_posts,
-                    top_discussed_posts,
-                    top_reacted_posts,
-                    top_viewed_posts,
-                    top_success_posts,
-                    limit=min(requested_count, 3),
-                )
+                interest_posts = fallback_interest_posts
                 if derived_post_themes:
                     paragraphs.append(
                         f"Автоматически выделить устойчивую карту тем пока не удалось, но по постам заметнее всего сюжеты о {self._join_list(derived_post_themes[: min(requested_count, 3)])}."
@@ -3538,6 +3613,37 @@ class SummaryGenerator:
                         reason = self._build_interest_reason_snippet(interest_posts[0]).strip()
                         if reason:
                             paragraphs.append(f"Почему аудитория цепляется за эти сюжеты: {reason}")
+                elif focus_evidence:
+                    focus_posts = [item["post"] for item in focus_evidence[: min(requested_count, 3)] if item.get("post")]
+                    if focus_posts:
+                        paragraphs.append(
+                            f"Ближе всего к запросу сейчас публикации {self._format_ranked_posts(focus_posts, 'comments', min(requested_count, 3))}."
+                        )
+                        if derived_post_themes:
+                            paragraphs.append(
+                                f"По самим публикациям заметнее всего темы {self._join_list(derived_post_themes[: min(requested_count, 3)])}."
+                            )
+                        if "causal_explanation" in prompt_modes:
+                            reason = self._build_interest_reason_snippet(focus_posts[0]).strip()
+                            if reason:
+                                paragraphs.append(f"Почему именно эти сюжеты тянут внимание: {reason}")
+                elif derived_post_themes:
+                    paragraphs.append(
+                        f"На уровне самих публикаций заметнее всего темы {self._join_list(derived_post_themes[: min(requested_count, 3)])}."
+                    )
+
+                elif theme_candidates:
+                    paragraphs.append(
+                        f"РќР° СѓСЂРѕРІРЅРµ СЃР°РјРёС… РїСѓР±Р»РёРєР°С†РёР№ Р·Р°РјРµС‚РЅРµРµ РІСЃРµРіРѕ С‚РµРјС‹ {self._join_list(theme_candidates[: min(requested_count, 3)])}."
+                    )
+                    if fallback_interest_posts:
+                        paragraphs.append(
+                            f"РџРѕ Р±Р»РёР¶Р°Р№С€РёРј РїСѓР±Р»РёРєР°С†РёСЏРј Р»РёРґРёСЂСѓСЋС‚ {self._format_ranked_posts(fallback_interest_posts, 'comments', min(requested_count, 3))}."
+                        )
+                        if "causal_explanation" in prompt_modes:
+                            reason = self._build_interest_reason_snippet(fallback_interest_posts[0]).strip()
+                            if reason:
+                                paragraphs.append(f"РџРѕС‡РµРјСѓ СЌС‚Рё СЃСЋР¶РµС‚С‹ РїСЂРёРІР»РµРєР°СЋС‚ РІРЅРёРјР°РЅРёРµ: {reason}")
 
         elif primary_mode == "theme_popularity" and theme_items:
             theme_slice = theme_items[: min(len(theme_items), requested_count)]

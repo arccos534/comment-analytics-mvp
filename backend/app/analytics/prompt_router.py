@@ -88,6 +88,30 @@ SEMANTIC_TEMPLATES = [
         "reason": "source_metrics_request",
     },
     {
+        "prompt": "какой пост самый успешный",
+        "mode": "post_popularity",
+        "needs_llm_reasoning": True,
+        "needs_comment_analysis": True,
+        "needs_theme_analysis": False,
+        "reason": "successful_post_request",
+    },
+    {
+        "prompt": "какие посты лучшие",
+        "mode": "post_popularity",
+        "needs_llm_reasoning": True,
+        "needs_comment_analysis": True,
+        "needs_theme_analysis": False,
+        "reason": "successful_posts_request",
+    },
+    {
+        "prompt": "покажи самые сильные публикации",
+        "mode": "post_popularity",
+        "needs_llm_reasoning": True,
+        "needs_comment_analysis": True,
+        "needs_theme_analysis": False,
+        "reason": "strong_publications_request",
+    },
+    {
         "prompt": "какая новость вызвала больше всего негатива и почему",
         "mode": "post_sentiment",
         "needs_llm_reasoning": True,
@@ -102,6 +126,22 @@ SEMANTIC_TEMPLATES = [
         "needs_comment_analysis": True,
         "needs_theme_analysis": False,
         "reason": "post_positive_reaction_request",
+    },
+    {
+        "prompt": "какая новость вызвала лучшую реакцию",
+        "mode": "post_sentiment",
+        "needs_llm_reasoning": True,
+        "needs_comment_analysis": True,
+        "needs_theme_analysis": False,
+        "reason": "best_reaction_post_request",
+    },
+    {
+        "prompt": "какой пост лучше всего зашел аудитории",
+        "mode": "post_sentiment",
+        "needs_llm_reasoning": True,
+        "needs_comment_analysis": True,
+        "needs_theme_analysis": False,
+        "reason": "best_reaction_post_request",
     },
     {
         "prompt": "какие темы вызывают негативную реакцию и почему",
@@ -121,6 +161,14 @@ SEMANTIC_TEMPLATES = [
     },
     {
         "prompt": "какие темы собирают больше всего интереса аудитории",
+        "mode": "theme_interest",
+        "needs_llm_reasoning": True,
+        "needs_comment_analysis": True,
+        "needs_theme_analysis": True,
+        "reason": "theme_interest_request",
+    },
+    {
+        "prompt": "что сейчас сильнее всего цепляет людей",
         "mode": "theme_interest",
         "needs_llm_reasoning": True,
         "needs_comment_analysis": True,
@@ -202,6 +250,7 @@ class PromptRouter:
 
     def _route_by_rules(self, intent, prompt_text: str | None, override_mode: str | None) -> PromptRoute:
         normalized = normalize_prompt_text(prompt_text)
+        prompt_modes = set(getattr(intent, "prompt_mode", []) or [])
         has_explanation = bool(EXPLANATION_RE.search(normalized))
         has_comment_terms = bool(COMMENT_RE.search(normalized))
         has_theme_terms = bool(THEME_RE.search(normalized))
@@ -216,6 +265,18 @@ class PromptRouter:
                 confidence=0.99,
                 router_source="rule",
                 reason="analysis_mode_override",
+                intent=intent,
+            )
+
+        if {"successful_post_request", "successful_posts_request"} & prompt_modes:
+            return PromptRoute(
+                analysis_mode="post_popularity",
+                needs_llm_reasoning=True,
+                needs_comment_analysis=True,
+                needs_theme_analysis=False,
+                confidence=0.96,
+                router_source="rule",
+                reason="successful_posts_request",
                 intent=intent,
             )
 
@@ -244,24 +305,26 @@ class PromptRouter:
             )
 
         if intent.primary_mode == "post_sentiment":
+            confidence = 0.94 if {"most_negative_post", "most_positive_post"} & prompt_modes else (0.9 if has_comment_terms or has_explanation else 0.82)
             return PromptRoute(
                 analysis_mode="post_sentiment",
                 needs_llm_reasoning=True,
                 needs_comment_analysis=True,
                 needs_theme_analysis=False,
-                confidence=0.9 if has_comment_terms or has_explanation else 0.82,
+                confidence=confidence,
                 router_source="rule",
                 reason="post_sentiment_request",
                 intent=intent,
             )
 
         if intent.primary_mode in THEME_MODES:
+            confidence = 0.92 if ({"interest_analysis", "negative_analysis", "positive_analysis", "theme_analysis"} & prompt_modes) else (0.88 if has_theme_terms else 0.74)
             return PromptRoute(
                 analysis_mode=intent.primary_mode,
                 needs_llm_reasoning=True,
                 needs_comment_analysis=intent.primary_mode in {"theme_sentiment", "theme_interest"} or has_comment_terms or has_explanation,
                 needs_theme_analysis=True,
-                confidence=0.88 if has_theme_terms else 0.74,
+                confidence=confidence,
                 router_source="rule",
                 reason="theme_request",
                 intent=intent,

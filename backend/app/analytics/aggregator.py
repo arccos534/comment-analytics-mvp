@@ -64,6 +64,15 @@ class ReportAggregator:
         scoped_posts = scoped_posts or []
         prompt_modes = set(infer_prompt_mode(run.prompt_text))
         requested_item_count = extract_requested_count(run.prompt_text)
+        if requested_item_count is None:
+            if "successful_posts_request" in prompt_modes:
+                requested_item_count = 5
+            elif "successful_post_request" in prompt_modes or {"most_negative_post", "most_positive_post"} & prompt_modes:
+                requested_item_count = 1
+            elif "source_comparison" in prompt_modes:
+                requested_item_count = 3
+            elif {"interest_analysis", "theme_popularity_ranked", "theme_underperformance_ranked", "negative_analysis", "positive_analysis"} & prompt_modes:
+                requested_item_count = 5
         requested_source_metric = infer_source_metric(run.prompt_text) if "source_comparison" in prompt_modes else None
         requested_success_bucket_percent = (
             extract_requested_percentage(run.prompt_text)
