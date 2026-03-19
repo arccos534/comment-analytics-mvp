@@ -280,6 +280,57 @@ function getThemeInterestScore(item: ThemeReactionItem): number {
   );
 }
 
+function getPostInterestScore(post: ReportPost): number {
+  return (
+    Number(post.comments_count || 0) * 4 +
+    Number(post.likes_count || 0) * 3 +
+    Number(post.reposts_count || 0) * 2 +
+    Number(post.views_count || 0)
+  );
+}
+
+function getThemeSupportingPosts(report: ReportSnapshot["report_json"], mode: AnalysisMode): ReportPost[] {
+  if (!isThemeMode(mode)) {
+    return [];
+  }
+
+  const seen = new Set<string>();
+  const pushUniquePost = (items: ReportPost[], post: ReportPost | null | undefined) => {
+    if (!post) {
+      return items;
+    }
+    const key = getUniquePostKey(post);
+    if (!key || seen.has(key)) {
+      return items;
+    }
+    seen.add(key);
+    items.push(post);
+    return items;
+  };
+
+  const items: ReportPost[] = [];
+  const themeItems = getThemeCardConfig(report, mode).items;
+  themeItems.forEach((item) => {
+    pushUniquePost(items, item.leading_post);
+  });
+  if (items.length) {
+    return items;
+  }
+
+  const fallbackPosts = [
+    ...(report.posts.top_discussed || []),
+    ...(report.posts.top_popular || []),
+    ...(report.posts.matched || []),
+  ]
+    .filter(Boolean)
+    .sort((left, right) => getPostInterestScore(right) - getPostInterestScore(left));
+
+  fallbackPosts.forEach((post) => {
+    pushUniquePost(items, post);
+  });
+  return items;
+}
+
 function getSuccessBucketPercent(report: ReportSnapshot["report_json"]): number {
   const raw = Number(report.meta.requested_success_bucket_percent || 0);
   return Number.isFinite(raw) && raw > 0 ? raw : 20;
@@ -501,6 +552,11 @@ function getTakeawayLinks(report: ReportSnapshot["report_json"], mode: AnalysisM
     pushUniqueUrl("Check source", topSource?.source_url);
   }
 
+  if (["theme_sentiment", "theme_interest", "theme_popularity", "theme_underperformance"].includes(mode)) {
+    const supportingPosts = getThemeSupportingPosts(report, mode);
+    pushTopPostLinks(supportingPosts, Math.min(displayCount, 3));
+  }
+
   if (links.length !== 1) {
     return links;
   }
@@ -602,6 +658,15 @@ function getPostSections(report: ReportSnapshot["report_json"], mode: AnalysisMo
   }
 
   if (["theme_popularity", "theme_underperformance", "theme_interest", "theme_sentiment"].includes(mode)) {
+    if (mode === "theme_interest") {
+      return [
+        {
+          title: "Поддерживающие посты по интересу аудитории",
+          description: "Публикации, которые лучше всего подтверждают, какие сюжеты сильнее всего притягивают внимание аудитории.",
+          posts: getThemeSupportingPosts(report, mode).slice(0, 3),
+        },
+      ];
+    }
     return [];
   }
 
@@ -739,7 +804,7 @@ export default function ReportPage({ params }: { params: { projectId: string; re
     if (postsLimit !== defaultCount) {
       setPostsLimit(defaultCount);
     }
-    if (["post_popularity", "post_underperformance", "mixed"].includes(analysisMode)) {
+    if (["post_popularity", "post_underperformance", "mixed", "theme_interest"].includes(analysisMode)) {
       setShowPostPanels(true);
     }
   }, [analysisMode, postsLimit, report]);

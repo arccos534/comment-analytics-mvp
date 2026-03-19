@@ -1912,6 +1912,18 @@ class SummaryGenerator:
             ranked = sorted(dominant_posts, key=self._post_negative_key, reverse=True)
         return ranked[: max(limit, 1)]
 
+    def _select_interest_posts(self, *post_groups: list[dict], limit: int = 3) -> list[dict]:
+        seen_post_keys: set[str] = set()
+        unique_posts: list[dict] = []
+        for group in post_groups:
+            for post in group or []:
+                post_key = str(post.get("post_id") or post.get("post_url") or "")
+                if not post_key or post_key in seen_post_keys:
+                    continue
+                seen_post_keys.add(post_key)
+                unique_posts.append(post)
+        return sorted(unique_posts, key=self._post_interest_key, reverse=True)[: max(limit, 1)]
+
     def _post_success_key(self, post: dict) -> tuple[int, int, int, int]:
         return (
             int(post.get("views_count", 0) or 0),
@@ -1926,6 +1938,14 @@ class SummaryGenerator:
             int(post.get("views_count", 0) or 0),
             int(post.get("comments_count", 0) or 0),
             int(post.get("reposts_count", 0) or 0),
+        )
+
+    def _post_interest_key(self, post: dict) -> tuple[int, int, int, int]:
+        return (
+            int(post.get("comments_count", 0) or 0),
+            int(post.get("likes_count", 0) or 0),
+            int(post.get("reposts_count", 0) or 0),
+            int(post.get("views_count", 0) or 0),
         )
 
     def _post_positive_key(self, post: dict) -> tuple[int, int, int, int, int]:
@@ -3202,10 +3222,34 @@ class SummaryGenerator:
                 takeaways.append("В текущей выборке нет тем с устойчиво позитивной реакцией: позитивные комментарии не перевешивают негативные.")
             return list(dict.fromkeys(item for item in takeaways if item))[:3]
 
-        if primary_mode == "theme_interest" and theme_items:
-            takeaways.append(f"Больше всего интереса аудитории собирают темы {self._join_list([item['theme'] for item in theme_items[: min(len(theme_items), 3)]])}.")
-            takeaways.append(f"По метрикам лидируют: {self._format_ranked_themes(theme_items, min(requested_count, 3))}.")
-            return list(dict.fromkeys(item for item in takeaways if item))[:3]
+        if primary_mode == "theme_interest":
+            if theme_items:
+                theme_slice = theme_items[: min(len(theme_items), requested_count)]
+                takeaways.append(f"Больше всего интереса аудитории собирают темы {self._join_list([item['theme'] for item in theme_slice])}.")
+                takeaways.append(f"По метрикам лидируют: {self._format_ranked_themes(theme_slice, min(requested_count, 3))}.")
+                if "causal_explanation" in prompt_modes:
+                    reason = self._build_interest_reason_snippet(theme_slice[0]).strip()
+                    if reason:
+                        takeaways.append(f"Почему интерес высокий: {reason}")
+                return list(dict.fromkeys(item for item in takeaways if item))[:3]
+
+            interest_posts = self._select_interest_posts(
+                matched_posts,
+                top_discussed_posts,
+                top_reacted_posts,
+                top_viewed_posts,
+                top_success_posts,
+                limit=min(requested_count, 3),
+            )
+            if interest_posts:
+                takeaways.append(
+                    f"Устойчивую карту тем пока собрать не удалось, поэтому ближе всего к запросу сейчас посты {self._format_ranked_posts(interest_posts, 'comments', min(requested_count, 3))}."
+                )
+                if "causal_explanation" in prompt_modes:
+                    reason = self._build_interest_reason_snippet(interest_posts[0]).strip()
+                    if reason:
+                        takeaways.append(f"Почему аудитория цепляется за эти сюжеты: {reason}")
+                return list(dict.fromkeys(item for item in takeaways if item))[:3]
 
         if primary_mode == "theme_popularity" and theme_items:
             takeaways.append(f"Самые популярные темы в текущем срезе — {self._join_list([item['theme'] for item in theme_items[: min(len(theme_items), 3)]])}.")
@@ -3462,12 +3506,38 @@ class SummaryGenerator:
             elif "positive_analysis" in prompt_modes and "negative_analysis" not in prompt_modes:
                 paragraphs.append("В текущей выборке нет тем с устойчиво позитивной реакцией: позитивные комментарии не перевешивают негативные.")
 
-        elif primary_mode == "theme_interest" and theme_items:
-            theme_slice = theme_items[: min(len(theme_items), requested_count)]
-            paragraphs.append(
-                f"Больше всего интереса аудитории собирают темы {self._join_list([item['theme'] for item in theme_slice])}."
-            )
-            paragraphs.append(f"Метрики ключевых тем: {self._format_ranked_themes(theme_slice, min(requested_count, 5))}.")
+        elif primary_mode == "theme_interest":
+            if theme_items:
+                theme_slice = theme_items[: min(len(theme_items), requested_count)]
+                paragraphs.append(
+                    f"Больше всего интереса аудитории собирают темы {self._join_list([item['theme'] for item in theme_slice])}."
+                )
+                paragraphs.append(f"Метрики ключевых тем: {self._format_ranked_themes(theme_slice, min(requested_count, 5))}.")
+                if "causal_explanation" in prompt_modes:
+                    reason = self._build_interest_reason_snippet(theme_slice[0]).strip()
+                    if reason:
+                        paragraphs.append(f"Почему именно эти темы тянут внимание аудитории: {reason}")
+            else:
+                interest_posts = self._select_interest_posts(
+                    matched_posts,
+                    top_discussed_posts,
+                    top_reacted_posts,
+                    top_viewed_posts,
+                    top_success_posts,
+                    limit=min(requested_count, 3),
+                )
+                if derived_post_themes:
+                    paragraphs.append(
+                        f"Автоматически выделить устойчивую карту тем пока не удалось, но по постам заметнее всего сюжеты о {self._join_list(derived_post_themes[: min(requested_count, 3)])}."
+                    )
+                if interest_posts:
+                    paragraphs.append(
+                        f"Если смотреть на сами публикации как на ближайшие сигналы интереса, лидируют посты {self._format_ranked_posts(interest_posts, 'comments', min(requested_count, 3))}."
+                    )
+                    if "causal_explanation" in prompt_modes:
+                        reason = self._build_interest_reason_snippet(interest_posts[0]).strip()
+                        if reason:
+                            paragraphs.append(f"Почему аудитория цепляется за эти сюжеты: {reason}")
 
         elif primary_mode == "theme_popularity" and theme_items:
             theme_slice = theme_items[: min(len(theme_items), requested_count)]
@@ -3693,6 +3763,62 @@ class SummaryGenerator:
         if reason_summary and examples_phrase:
             return f"{reason_summary} {examples_phrase.strip()}"
         return f"{reason_summary}{examples_phrase}".strip()
+
+    def _examples_for_interest(self, item: dict) -> list[dict]:
+        combined: list[dict] = []
+        seen: set[str] = set()
+
+        def append_examples(examples: list[dict] | None) -> None:
+            for example in examples or []:
+                fingerprint = (example.get("text") or "").strip().lower()
+                if not fingerprint or fingerprint in seen:
+                    continue
+                seen.add(fingerprint)
+                combined.append(example)
+
+        for key in (
+            "positive_examples",
+            "negative_examples",
+            "neutral_examples",
+            "positive_comment_examples",
+            "negative_comment_examples",
+            "neutral_comment_examples",
+        ):
+            append_examples(item.get(key))
+
+        leading_post = item.get("leading_post") or {}
+        for key in ("positive_comment_examples", "negative_comment_examples", "neutral_comment_examples"):
+            append_examples(leading_post.get(key))
+
+        return combined
+
+    def _build_interest_reason_snippet(self, item: dict) -> str:
+        examples = self._examples_for_interest(item)
+        comments_count = int(item.get("comments_count", 0) or 0)
+        likes_count = int(item.get("likes_count", 0) or 0)
+        reposts_count = int(item.get("reposts_count", 0) or 0)
+        metric_label = self._engagement_metric_label(item)
+
+        parts: list[str] = []
+        if comments_count > 0:
+            if likes_count > 0 or reposts_count > 0:
+                parts.append(
+                    f"Интерес держится не только на охвате: по этой теме видно {comments_count} комментариев, {likes_count} {metric_label} и {reposts_count} репостов."
+                )
+            else:
+                parts.append(f"Главный сигнал интереса здесь — {comments_count} комментариев к публикациям по теме.")
+        elif likes_count > 0 or reposts_count > 0:
+            parts.append(f"Интерес поддерживают реакции и репосты: {likes_count} {metric_label} и {reposts_count} репостов.")
+
+        signal_topics = [topic for topic in self._extract_signal_topics_from_examples(examples, limit=2) if topic]
+        if signal_topics:
+            parts.append(f"В комментариях чаще всего обсуждают {self._join_list(signal_topics[:2])}.")
+
+        example_phrase = self._comment_examples_phrase(examples, limit=1).strip()
+        if example_phrase:
+            parts.append(example_phrase)
+
+        return " ".join(part for part in parts if part).strip()
 
     def _join_list(self, items: list[str]) -> str:
         cleaned = [item for item in items if item]
