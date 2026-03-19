@@ -703,7 +703,13 @@ export default function ReportPage({ params }: { params: { projectId: string; re
           analysisMode={analysisMode}
           takeawayLinks={takeawayLinks}
         />
-        {isSourceMode ? <SourceComparisonCard items={comparisonItems} title={getSourceComparisonTitle(report, comparisonItems.length)} /> : null}
+        {isSourceMode ? (
+          <SourceComparisonCard
+            items={comparisonItems}
+            title={getSourceComparisonTitle(report, comparisonItems.length)}
+            metric={sourceMetric}
+          />
+        ) : null}
       </div>
 
       {showThemeCard ? (

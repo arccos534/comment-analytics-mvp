@@ -56,14 +56,15 @@ class ReportService:
             ]
             overview = f"Топ {len(top_sources)} источников по {metric_label}: {'; '.join(summary_lines)}."
             takeaways.append(overview)
-            takeaways.append(
-                "Средние метрики по этим источникам: "
-                + "; ".join(
-                    f"«{item.get('source_title') or item.get('source_url') or 'Источник без названия'}» — {self._format_source_metrics(item)}"
-                    for item in top_sources
+            if self._wants_source_metric_breakdown(prompt_text, source_metric):
+                takeaways.append(
+                    "Средние метрики по этим источникам: "
+                    + "; ".join(
+                        f"«{item.get('source_title') or item.get('source_url') or 'Источник без названия'}» — {self._format_source_metrics(item)}"
+                        for item in top_sources
+                    )
+                    + "."
                 )
-                + "."
-            )
         elif mode == "post_popularity":
             ranked = self._select_ranked_posts(report_json, prompt_text, strongest=True)
             if ranked:
@@ -215,6 +216,25 @@ class ReportService:
             "engagement": "совокупности метрик",
         }
         return titles.get(metric, "совокупности метрик")
+
+    def _wants_source_metric_breakdown(self, prompt_text: str | None, source_metric: str) -> bool:
+        if source_metric == "engagement":
+            return True
+        lowered = (prompt_text or "").lower()
+        return any(
+            token in lowered
+            for token in (
+                "сравни",
+                "сравнение",
+                "метрик",
+                "метрики",
+                "подроб",
+                "в среднем",
+                "средние",
+                "вовлеч",
+                "полный",
+            )
+        )
 
     def _format_source_metrics(self, source: dict) -> str:
         metric_label = "реакций" if (source.get("platform") or "").lower() == "telegram" else "лайков"
