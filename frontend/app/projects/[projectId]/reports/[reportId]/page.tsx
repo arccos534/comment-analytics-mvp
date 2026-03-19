@@ -141,14 +141,15 @@ function getRequestedCount(report: ReportSnapshot["report_json"]): number | null
 function getDefaultDisplayCount(mode: AnalysisMode): number {
   switch (mode) {
     case "source_comparison":
+    case "post_popularity":
+    case "post_underperformance":
+    case "mixed":
       return 3;
     case "theme_sentiment":
     case "theme_interest":
     case "theme_popularity":
     case "theme_underperformance":
       return 5;
-    case "mixed":
-      return 3;
     default:
       return 5;
   }
@@ -160,6 +161,23 @@ function getDisplayCount(report: ReportSnapshot["report_json"], mode: AnalysisMo
 
 function getRequestedSourceMetric(report: ReportSnapshot["report_json"]): string {
   return String(report.meta.requested_source_metric || "engagement");
+}
+
+function getRequestedPostMetric(report: ReportSnapshot["report_json"]): "likes" | "views" | "comments" | "reposts" | "engagement" {
+  const lowered = String(report.meta.prompt_text || "").toLowerCase();
+  if (lowered.includes("лайк") || lowered.includes("реакц")) {
+    return "likes";
+  }
+  if (lowered.includes("просмотр") || lowered.includes("охват")) {
+    return "views";
+  }
+  if (lowered.includes("коммент")) {
+    return "comments";
+  }
+  if (lowered.includes("репост")) {
+    return "reposts";
+  }
+  return "engagement";
 }
 
 function getSourceComparisonSortValue(item: SourceComparisonItem, metric: string) {
@@ -380,6 +398,7 @@ function getThemeCardConfig(report: ReportSnapshot["report_json"], mode: Analysi
 function getTakeawayLinks(report: ReportSnapshot["report_json"], mode: AnalysisMode): TakeawayLink[] {
   const promptModes = new Set(report.summary.prompt_modes || []);
   const links: TakeawayLink[] = [];
+  const displayCount = getDisplayCount(report, mode);
 
   const pushUniqueUrl = (label: string, url?: string | null) => {
     const normalized = (url || "").trim();
@@ -392,6 +411,15 @@ function getTakeawayLinks(report: ReportSnapshot["report_json"], mode: AnalysisM
   const pushUniqueLink = (label: string, posts: ReportPost[] | undefined) => {
     const target = (posts || []).find((item) => item.post_url?.trim());
     pushUniqueUrl(label, target?.post_url);
+  };
+
+  const pushTopPostLinks = (posts: ReportPost[] | undefined, count: number) => {
+    (posts || [])
+      .filter((item) => item.post_url?.trim())
+      .slice(0, Math.max(1, count))
+      .forEach((item, index) => {
+        pushUniqueUrl(count > 1 ? `Source post ${index + 1}` : "Source post", item.post_url);
+      });
   };
 
   if (mode === "post_sentiment") {
@@ -418,7 +446,19 @@ function getTakeawayLinks(report: ReportSnapshot["report_json"], mode: AnalysisM
     } else if (promptModes.has("most_discussed_news")) {
       pushUniqueLink("Source post", report.posts.top_discussed);
     } else {
-      pushUniqueLink("Source post", report.posts.top_popular);
+      const metric = getRequestedPostMetric(report);
+      if (metric === "likes") {
+        pushTopPostLinks(report.posts.top_reacted, displayCount);
+      } else if (metric === "views" || metric === "engagement") {
+        const posts = [...(report.posts.top_popular || [])].sort(
+          (left, right) => Number(right.views_count || 0) - Number(left.views_count || 0)
+        );
+        pushTopPostLinks(posts, displayCount);
+      } else if (metric === "comments") {
+        pushTopPostLinks(report.posts.top_discussed, displayCount);
+      } else {
+        pushTopPostLinks(report.posts.top_popular, displayCount);
+      }
     }
   }
 
@@ -431,7 +471,17 @@ function getTakeawayLinks(report: ReportSnapshot["report_json"], mode: AnalysisM
       );
       pushUniqueLink("Source post", posts);
     } else {
-      pushUniqueLink("Source post", report.posts.top_unpopular);
+      const metric = getRequestedPostMetric(report);
+      if (metric === "likes") {
+        pushTopPostLinks(report.posts.top_unreacted, displayCount);
+      } else if (metric === "views" || metric === "engagement") {
+        const posts = [...(report.posts.top_unpopular || [])].sort(
+          (left, right) => Number(left.views_count || 0) - Number(right.views_count || 0)
+        );
+        pushTopPostLinks(posts, displayCount);
+      } else {
+        pushTopPostLinks(report.posts.top_unpopular, displayCount);
+      }
     }
   }
 
@@ -624,7 +674,7 @@ export default function ReportPage({ params }: { params: { projectId: string; re
   const runQuery = useAnalysisRun(params.reportId);
   const reportQuery = useReport(params.reportId, runQuery.data?.status === "completed");
   const [showPostPanels, setShowPostPanels] = useState(false);
-  const [postsLimit, setPostsLimit] = useState("5");
+  const [postsLimit, setPostsLimit] = useState("3");
 
   useEffect(() => {
     const status = runQuery.data?.status;
@@ -683,6 +733,16 @@ export default function ReportPage({ params }: { params: { projectId: string; re
   const showGenericComments = analysisMode === "topic_report" && hasComments && commentSections.length === 0;
   const showPostPanelsToggle = postSections.length > 0;
   const topGridClass = isSourceMode ? "xl:grid-cols-[1.2fr_0.8fr]" : showTopicsCard ? "xl:grid-cols-2" : "xl:grid-cols-1";
+
+  useEffect(() => {
+    const defaultCount = String(getDisplayCount(report, analysisMode));
+    if (postsLimit !== defaultCount) {
+      setPostsLimit(defaultCount);
+    }
+    if (["post_popularity", "post_underperformance", "mixed"].includes(analysisMode)) {
+      setShowPostPanels(true);
+    }
+  }, [analysisMode, postsLimit, report]);
 
   return (
     <div className="space-y-8">

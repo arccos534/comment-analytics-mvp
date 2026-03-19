@@ -39,7 +39,7 @@ class ReportService:
         meta = report_json.get("meta", {}) or {}
         posts = report_json.get("posts", {}) or {}
         sources = (report_json.get("sources", {}) or {}).get("comparison", []) or []
-        default_count = 3 if mode == "source_comparison" else 5
+        default_count = 3 if mode in {"source_comparison", "post_popularity", "post_underperformance"} else 5
         requested_count = extract_requested_count(prompt_text) or int(meta.get("requested_item_count") or 0) or default_count
 
         overview = "По текущей выборке недостаточно данных для содержательного вывода."
@@ -68,29 +68,25 @@ class ReportService:
         elif mode == "post_popularity":
             ranked = self._select_ranked_posts(report_json, prompt_text, strongest=True)
             if ranked:
-                lead = ranked[0]
-                overview = (
-                    f"Лидирующий пост — «{lead.get('post_text') or 'без названия'}»: "
-                    f"{self._format_post_metrics(lead)}."
-                )
-                takeaways.append(overview)
-                if len(ranked) > 1:
-                    takeaways.append(
-                        f"Следом идут: {self._join_post_titles(ranked[1 : min(len(ranked), min(requested_count, 3))])}."
-                    )
+                top_posts = ranked[: max(1, min(requested_count, len(ranked), 10))]
+                metric_label = self._post_metric_title(prompt_text, strongest=True)
+                summary_lines = [
+                    f"{index + 1}. «{post.get('post_text') or 'без названия'}» — {self._format_post_metrics(post)}"
+                    for index, post in enumerate(top_posts)
+                ]
+                overview = f"Топ {len(top_posts)} постов по {metric_label}: {'; '.join(summary_lines)}."
+                takeaways.extend(summary_lines[:3])
         elif mode == "post_underperformance":
             ranked = self._select_ranked_posts(report_json, prompt_text, strongest=False)
             if ranked:
-                lead = ranked[0]
-                overview = (
-                    f"Наименее сильный пост — «{lead.get('post_text') or 'без названия'}»: "
-                    f"{self._format_post_metrics(lead)}."
-                )
-                takeaways.append(overview)
-                if len(ranked) > 1:
-                    takeaways.append(
-                        f"В числе самых слабых также: {self._join_post_titles(ranked[1 : min(len(ranked), min(requested_count, 3))])}."
-                    )
+                bottom_posts = ranked[: max(1, min(requested_count, len(ranked), 10))]
+                metric_label = self._post_metric_title(prompt_text, strongest=False)
+                summary_lines = [
+                    f"{index + 1}. «{post.get('post_text') or 'без названия'}» — {self._format_post_metrics(post)}"
+                    for index, post in enumerate(bottom_posts)
+                ]
+                overview = f"Топ {len(bottom_posts)} слабых постов по {metric_label}: {'; '.join(summary_lines)}."
+                takeaways.extend(summary_lines[:3])
 
         summary = {
             "overview": overview,
@@ -139,6 +135,18 @@ class ReportService:
         parts.append(f"{comments} комментариев")
         parts.append(f"{reposts} репостов")
         return ", ".join(parts)
+
+    def _post_metric_title(self, prompt_text: str | None, strongest: bool) -> str:
+        lowered = (prompt_text or "").lower()
+        if "просмотр" in lowered or "охват" in lowered:
+            return "просмотрам" if strongest else "минимальным просмотрам"
+        if "лайк" in lowered or "реакц" in lowered:
+            return "лайкам или реакциям" if strongest else "минимальным лайкам или реакциям"
+        if "коммент" in lowered:
+            return "комментариям" if strongest else "минимальным комментариям"
+        if "репост" in lowered:
+            return "репостам" if strongest else "минимальным репостам"
+        return "совокупности метрик" if strongest else "слабым метрикам"
 
     def _join_post_titles(self, posts: list[dict]) -> str:
         titles = [f"«{(item.get('post_text') or 'без названия')}»" for item in posts if item]
