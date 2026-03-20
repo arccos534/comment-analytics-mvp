@@ -1633,15 +1633,15 @@ class SummaryGenerator:
         phrase = self._titleize_phrase(phrase)
 
         weak_phrases = {
-            "???????? ??????????? ????",
-            "??????????? ????",
-            "????????? ????????",
-            "???????? ???????????",
-            "???????? ????????? ??????????",
-            "????????? ?????????? ???????",
-            "????? ?????? ??????????",
+            "Общее обсуждение",
+            "Общая реакция",
+            "Главные новости",
+            "Общие новости",
+            "Общие сюжетные линии",
+            "Основные темы постов",
+            "Темы этой выборки",
         }
-        if phrase in weak_phrases:
+        if phrase in weak_phrases or phrase.isdigit():
             return None
         return phrase
 
@@ -3894,6 +3894,247 @@ class SummaryGenerator:
 
         raw_topics = self._extract_signal_topics_from_examples(examples, limit=limit)
         return [topic for topic in raw_topics if len(topic.split()) >= 2][:limit]
+
+    def _prepare_post_text_for_theme_llm(self, text: str) -> str:
+        prepared = re.sub(r"https?://\S+|t\.me/\S+|vk\.com/\S+", " ", text)
+        prepared = re.sub(r"[@#]\S+", " ", prepared)
+        prepared = re.sub(r"[^\w\s.,!?:;()\-\u2013\u2014]", " ", prepared)
+        prepared = re.sub(r"\s+", " ", prepared).strip()
+        prepared = self._strip_theme_noise_suffix(prepared)
+        prepared = self._extract_title_phrase(prepared) or prepared
+        return self._shorten(prepared, limit=180)
+
+    def _extract_title_phrase(self, text: str) -> str:
+        sentence = self._split_into_sentences(text)[0].strip()
+        sentence = re.sub(r"\s+[—–-]\s+.*$", "", sentence)
+        sentence = re.sub(r"\s{2,}", " ", sentence).strip(" .,!?:;-")
+        if "," in sentence:
+            parts = [part.strip() for part in sentence.split(",") if part.strip()]
+            if parts:
+                sentence = max(parts, key=len)
+        return sentence
+
+    def _normalize_text(self, value: str) -> str:
+        return " ".join(value.lower().replace("ё", "е").split())
+
+    def _extract_roots(self, text: str) -> set[str]:
+        tokens = re.findall(r"[a-zа-я0-9-]{4,}", self._normalize_text(text))
+        roots = {self._stem_token(token) for token in tokens}
+        return {root for root in roots if root}
+
+    def _term_matches_text(self, term: str, text: str) -> bool:
+        normalized_text = self._normalize_text(text)
+        normalized_term = self._normalize_text(term)
+        if not normalized_text or not normalized_term:
+            return False
+        if normalized_term in normalized_text:
+            return True
+
+        term_roots = self._extract_roots(normalized_term)
+        text_roots = self._extract_roots(normalized_text)
+        if not term_roots or not text_roots:
+            return False
+
+        for root in term_roots:
+            for candidate in text_roots:
+                if candidate == root:
+                    return True
+                if len(root) >= 5 and (candidate.startswith(root) or root.startswith(candidate)):
+                    return True
+        return False
+
+    def _normalize_single_theme(self, theme: str) -> str | None:
+        text = self._normalize_text(theme)
+        if not text:
+            return None
+
+        for pattern, label in CANONICAL_THEME_PATTERNS:
+            if re.search(pattern, text):
+                return label
+
+        tokens = [
+            token
+            for token in re.findall(r"[a-zа-я0-9-]{4,}", text)
+            if self._is_theme_token(token) and token not in THEME_NOISE_TOKENS and not token.isdigit()
+        ]
+        if not tokens:
+            return None
+
+        if len(tokens) > 1:
+            tokens = [
+                token
+                for token in tokens
+                if self._stem_token(token) not in LOCATION_NOISE_ROOTS and token not in THEME_NOISE_TOKENS
+            ] or tokens
+
+        if len(tokens) >= 3:
+            tokens = tokens[:3]
+        if len(tokens) == 2 and all(self._looks_like_verb(token) for token in tokens):
+            return None
+
+        phrase = self._titleize_phrase(" ".join(tokens))
+        weak_phrases = {
+            "Общее обсуждение",
+            "Общая реакция",
+            "Главные новости",
+            "Общие новости",
+            "Общие сюжетные линии",
+            "Основные темы постов",
+            "Темы этой выборки",
+        }
+        if not phrase or phrase in weak_phrases or phrase.isdigit():
+            return None
+        return phrase
+
+    def _theme_signature(self, theme: str) -> set[str]:
+        return {
+            self._stem_token(token)
+            for token in re.findall(r"[a-zа-я0-9-]{4,}", self._normalize_text(theme))
+            if token not in POST_THEME_STOPWORDS and token not in THEME_NOISE_TOKENS and not token.isdigit()
+        }
+
+    def _split_into_sentences(self, text: str) -> list[str]:
+        chunks = [chunk.strip() for chunk in re.split(r"[.!?…:\n\r]+", text) if chunk.strip()]
+        return chunks or [text]
+
+    def _looks_like_verb(self, token: str) -> bool:
+        verb_endings = (
+            "ать",
+            "ять",
+            "еть",
+            "ить",
+            "ыть",
+            "уть",
+            "ться",
+            "ти",
+            "чь",
+            "ется",
+            "утся",
+            "ются",
+            "ится",
+            "атся",
+            "ятся",
+            "ет",
+            "ут",
+            "ют",
+            "ит",
+            "ат",
+            "ят",
+        )
+        if token in VERBISH_THEME_TOKENS:
+            return True
+        return token.endswith(verb_endings)
+
+    def _looks_like_adjective(self, token: str) -> bool:
+        adjective_endings = (
+            "ый",
+            "ий",
+            "ой",
+            "ая",
+            "ое",
+            "ые",
+            "ого",
+            "ему",
+            "ому",
+            "ыми",
+            "ими",
+            "ую",
+            "яя",
+            "ее",
+        )
+        return token.endswith(adjective_endings)
+
+    def _theme_matches_post(self, theme: str, post: dict) -> bool:
+        theme_text = self._normalize_text(theme)
+        post_text = self._normalize_text(post.get("post_text") or "")
+        if not theme_text or not post_text:
+            return False
+
+        for pattern, label in CANONICAL_THEME_PATTERNS:
+            if label == theme and re.search(pattern, post_text):
+                return True
+
+        tokens = [token for token in re.findall(r"[a-zа-я0-9-]{4,}", theme_text) if token not in POST_THEME_STOPWORDS]
+        if not tokens:
+            return False
+        return all(self._term_matches_text(token, post_text) for token in tokens[:2])
+
+    def _engagement_label(self, comments_count: int, likes_count: int, reposts_count: int) -> str:
+        score = comments_count * 5 + likes_count * 2 + reposts_count * 4
+        if score >= 150:
+            return "высокий"
+        if score >= 50:
+            return "средний"
+        return "низкий"
+
+    def _reaction_label(self, positive_count: int, negative_count: int, neutral_count: int) -> str:
+        if positive_count <= 0 and negative_count <= 0:
+            return "скорее нейтральная"
+        if positive_count >= negative_count * 2 and positive_count > neutral_count * 0.2:
+            return "скорее позитивная"
+        if negative_count >= positive_count * 2 and negative_count > neutral_count * 0.2:
+            return "скорее негативная"
+        return "скорее смешанная"
+
+    def _titleize_phrase(self, phrase: str) -> str:
+        parts = [part for part in phrase.split() if part]
+        if not parts:
+            return phrase
+        return " ".join(parts).capitalize()
+
+    def _extract_signal_topics_from_examples(self, examples: list[dict], limit: int = 4) -> list[str]:
+        counter: Counter[str] = Counter()
+        for example in examples:
+            for topic in example.get("topics", []) or []:
+                cleaned_topic = (topic or "").strip()
+                if cleaned_topic:
+                    counter[cleaned_topic] += 3
+            for keyword in example.get("keywords", []) or []:
+                cleaned_keyword = (keyword or "").strip()
+                if cleaned_keyword:
+                    counter[cleaned_keyword] += 2
+
+            text = self._normalize_text(example.get("text") or "")
+            tokens = [
+                token
+                for token in re.findall(r"[a-zа-я0-9-]{4,}", text)
+                if token not in POST_THEME_STOPWORDS and token not in THEME_NOISE_TOKENS and not token.isdigit()
+            ]
+            phrases: set[str] = set()
+            for size in (3, 2):
+                for index in range(0, max(len(tokens) - size + 1, 0)):
+                    phrase = " ".join(tokens[index : index + size]).strip()
+                    if len(phrase) >= 8:
+                        phrases.add(phrase)
+            if not phrases:
+                phrases.update(token for token in tokens if len(token) >= 5)
+            for phrase in phrases:
+                counter[phrase] += 1
+
+        ordered: list[str] = []
+        for phrase, _ in counter.most_common(limit * 3):
+            title = self._titleize_phrase(phrase)
+            if title and title not in ordered and not title.isdigit():
+                ordered.append(title)
+            if len(ordered) >= limit:
+                break
+        return ordered
+
+    def _format_ranked_posts(self, posts: list[dict], priority: str, limit: int) -> str:
+        lines: list[str] = []
+        for post in posts[:limit]:
+            lines.append(f"«{post.get('post_text') or 'Пост без текста'}» — {self._format_post_metrics(post, priority=priority)}")
+        return "; ".join(lines)
+
+    def _format_ranked_themes(self, themes: list[dict], limit: int) -> str:
+        lines: list[str] = []
+        for item in themes[:limit]:
+            metric_label = self._engagement_metric_label(item)
+            lines.append(
+                f"«{item.get('theme') or 'Тема без названия'}» — {int(item.get('comments_count', 0) or 0)} комментариев, "
+                f"{int(item.get('likes_count', 0) or 0)} {metric_label}, {int(item.get('reposts_count', 0) or 0)} репостов"
+            )
+        return "; ".join(lines)
 
     def _comment_reason_summary(self, examples: list[dict], sentiment_label: str, sentiment: str | None = None) -> str:
         reason_labels = self._build_reason_labels_from_examples(examples, sentiment)
