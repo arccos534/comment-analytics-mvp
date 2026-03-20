@@ -1152,7 +1152,11 @@ class SummaryGenerator:
             return result
 
         fallback_posts = sorted(posts, key=self._post_interest_key, reverse=True)
-        for theme in themes[: max(limit, 1)]:
+        fallback_themes = themes[: max(limit, 1)] or self._fallback_theme_labels_from_posts(
+            fallback_posts,
+            limit=max(limit, 1),
+        )
+        for theme in fallback_themes:
             if len(result) >= max(limit, 1):
                 break
             leader = next(
@@ -1540,7 +1544,31 @@ class SummaryGenerator:
     ) -> list[str]:
         corpus = " ".join(self._normalize_text(post.get("post_text") or "") for post in posts)
         normalized = self._normalize_theme_candidates([], corpus, prompt_text=prompt_text, declared_theme=declared_theme)
-        return normalized[:5]
+        ordered: list[str] = []
+        for item in normalized + self._fallback_theme_labels_from_posts(posts, limit=5):
+            if item and item not in ordered:
+                ordered.append(item)
+        return ordered[:5]
+
+    def _fallback_theme_labels_from_posts(self, posts: list[dict], limit: int = 5) -> list[str]:
+        labels: list[str] = []
+        ranked_posts = sorted(posts, key=self._post_interest_key, reverse=True)
+        for post in ranked_posts:
+            prepared = self._prepare_post_text_for_theme_llm(post.get("post_text") or "")
+            normalized_text = self._normalize_text(prepared)
+            label: str | None = None
+            for pattern, canonical_label in CANONICAL_THEME_PATTERNS:
+                if re.search(pattern, normalized_text):
+                    label = canonical_label
+                    break
+            if not label:
+                label = self._normalize_single_theme(self._extract_title_phrase(prepared) or prepared)
+            if not label or label in labels:
+                continue
+            labels.append(label)
+            if len(labels) >= limit:
+                break
+        return labels
 
     def _normalize_theme_candidates(
         self,

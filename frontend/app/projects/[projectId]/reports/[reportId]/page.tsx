@@ -828,8 +828,16 @@ export default function ReportPage({ params }: { params: { projectId: string; re
     if (postsLimit !== defaultCount) {
       setPostsLimit(defaultCount);
     }
-    if (["post_popularity", "post_underperformance", "mixed", "theme_interest"].includes(analysisMode)) {
+    const hasThemeItems = getThemeCardConfig(report, analysisMode).items.length > 0;
+    if (
+      ["post_popularity", "post_underperformance", "mixed"].includes(analysisMode) ||
+      (analysisMode === "theme_interest" && !hasThemeItems)
+    ) {
       setShowPostPanels(true);
+      return;
+    }
+    if (analysisMode === "theme_interest" && hasThemeItems) {
+      setShowPostPanels(false);
     }
   }, [postsLimit, reportQuery.data]);
 
@@ -875,7 +883,7 @@ export default function ReportPage({ params }: { params: { projectId: string; re
   const showTopicsCard = analysisMode === "topic_report" && report.topics.length > 0;
   const showThemeCard = hasThemes && isThemeMode(analysisMode);
   const showGenericComments = analysisMode === "topic_report" && hasComments && commentSections.length === 0;
-  const alwaysShowPostPanels = analysisMode === "theme_interest" && postSections.length > 0;
+  const alwaysShowPostPanels = analysisMode === "theme_interest" && !hasThemes && postSections.length > 0;
   const showPostPanelsToggle = postSections.length > 0 && !alwaysShowPostPanels;
   const topGridClass = isSourceMode ? "xl:grid-cols-[1.2fr_0.8fr]" : showTopicsCard ? "xl:grid-cols-2" : "xl:grid-cols-1";
 
