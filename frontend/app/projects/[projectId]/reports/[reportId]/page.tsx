@@ -507,7 +507,6 @@ function getTakeawayLinks(report: ReportSnapshot["report_json"], mode: AnalysisM
 
   const pushTopPostLinks = (posts: ReportPost[] | undefined, count: number) => {
     (posts || [])
-      .filter((item) => item.post_url?.trim())
       .slice(0, Math.max(1, count))
       .forEach((item, index) => {
         pushUniqueUrl(count > 1 ? `Source post ${index + 1}` : "Source post", item.post_url);
@@ -528,6 +527,10 @@ function getTakeawayLinks(report: ReportSnapshot["report_json"], mode: AnalysisM
   }
 
   if (mode === "post_popularity") {
+    if ((report.summary.takeaway_posts || []).length) {
+      pushTopPostLinks(report.summary.takeaway_posts, displayCount);
+      return links;
+    }
     if (promptModes.has("successful_post_request") || promptModes.has("successful_posts_request")) {
       pushTopPostLinks(report.posts.success_top_bucket, displayCount);
     } else if (promptModes.has("most_reacted_post")) {
@@ -557,6 +560,10 @@ function getTakeawayLinks(report: ReportSnapshot["report_json"], mode: AnalysisM
   }
 
   if (mode === "post_underperformance") {
+    if ((report.summary.takeaway_posts || []).length) {
+      pushTopPostLinks(report.summary.takeaway_posts, displayCount);
+      return links;
+    }
     if (promptModes.has("least_reacted_post")) {
       pushUniqueLink("Source post", report.posts.top_unreacted);
     } else if (promptModes.has("least_viewed_post")) {

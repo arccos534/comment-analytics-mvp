@@ -44,6 +44,7 @@ class ReportService:
 
         overview = "По текущей выборке недостаточно данных для содержательного вывода."
         takeaways: list[str] = []
+        takeaway_posts: list[dict] = []
 
         if mode == "source_comparison" and sources:
             source_metric = str(meta.get("requested_source_metric") or infer_source_metric(prompt_text) or "engagement")
@@ -69,6 +70,7 @@ class ReportService:
             ranked = self._select_ranked_posts(report_json, prompt_text, strongest=True)
             if ranked:
                 top_posts = ranked[: max(1, min(requested_count, len(ranked), 10))]
+                takeaway_posts = top_posts
                 metric_label = self._post_metric_title(prompt_text, strongest=True)
                 summary_lines = [
                     f"{index + 1}. «{post.get('post_text') or 'без названия'}» — {self._format_post_metrics(post)}"
@@ -80,6 +82,7 @@ class ReportService:
             ranked = self._select_ranked_posts(report_json, prompt_text, strongest=False)
             if ranked:
                 bottom_posts = ranked[: max(1, min(requested_count, len(ranked), 10))]
+                takeaway_posts = bottom_posts
                 metric_label = self._post_metric_title(prompt_text, strongest=False)
                 summary_lines = [
                     f"{index + 1}. «{post.get('post_text') or 'без названия'}» — {self._format_post_metrics(post)}"
@@ -98,6 +101,7 @@ class ReportService:
             "analysis_axes": prompt_route.get("analysis_axes") or [],
             "request_contract": prompt_route.get("request_contract") or [],
             "answer_strategy": prompt_route.get("answer_strategy") or {},
+            "takeaway_posts": takeaway_posts,
             "confidence_assessment": {
                 "level": "high" if report_json.get("stats", {}).get("total_posts", 0) else "low",
                 "reason": f"router={prompt_route.get('router_source') or 'deterministic'} confidence={prompt_route.get('confidence') or 0}",

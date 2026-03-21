@@ -131,6 +131,7 @@ export interface SourceComparisonItem {
 export interface ReportSummary {
   overview?: string;
   takeaways?: string[];
+  takeaway_posts?: ReportPost[];
   analysis_mode?: AnalysisMode;
   primary_mode?: AnalysisMode;
   prompt_modes?: string[];
