@@ -162,6 +162,9 @@ export interface ReportSnapshot {
       prompt_text?: string | null;
       post_theme?: string | null;
       post_keywords?: string[];
+      needs_llm_reasoning?: boolean | null;
+      needs_comment_analysis?: boolean | null;
+      needs_theme_analysis?: boolean | null;
       requested_success_bucket_percent?: number | null;
       requested_item_count?: number | null;
       requested_source_metric?: string | null;

@@ -885,6 +885,7 @@ export default function ReportPage({ params }: { params: { projectId: string; re
     getDisplayCount(report, analysisMode)
   );
   const takeawayLinks = getTakeawayLinks(report, analysisMode);
+  const shouldShowNarrativeSummary = Boolean(report.meta.needs_llm_reasoning);
 
   const showSentimentCard = analysisMode === "topic_report" && hasComments;
   const showTopicsCard = analysisMode === "topic_report" && report.topics.length > 0;
@@ -906,7 +907,7 @@ export default function ReportPage({ params }: { params: { projectId: string; re
       <div className={`grid gap-5 ${topGridClass}`}>
         {showTopicsCard ? <TopicsCard topics={report.topics} /> : null}
         <ReportSummaryCard
-          summaryText={reportQuery.data.summary_text}
+          summaryText={shouldShowNarrativeSummary ? reportQuery.data.summary_text : null}
           meta={report.meta}
           stats={report.stats}
           takeaways={report.summary.takeaways || []}
